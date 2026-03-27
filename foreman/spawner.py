@@ -29,6 +29,9 @@ class Backend(ABC):
     async def send_text(self, name: str, text: str) -> None: ...
 
     @abstractmethod
+    async def capture_output(self, name: str) -> str | None: ...
+
+    @abstractmethod
     async def kill_terminal(self, name: str) -> None: ...
 
     @abstractmethod
@@ -88,6 +91,17 @@ class TmuxBackend(Backend):
         except ValueError:
             return None
 
+    async def capture_output(self, name: str) -> str | None:
+        proc = await asyncio.create_subprocess_exec(
+            "tmux", "capture-pane", "-t", f"{TMUX_SESSION}:{name}", "-p",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return None
+        return stdout.decode()
+
     async def send_text(self, name: str, text: str) -> None:
         proc = await asyncio.create_subprocess_exec(
             "tmux", "send-keys", "-t", f"{TMUX_SESSION}:{name}", text, "Enter",
@@ -127,6 +141,9 @@ class VSCodeBackend(Backend):
         await self._send({"action": "create_terminal", "name": name, "command": command})
 
     async def get_pid(self, name: str) -> int | None:
+        return None
+
+    async def capture_output(self, name: str) -> str | None:
         return None
 
     async def send_text(self, name: str, text: str) -> None:
@@ -236,34 +253,26 @@ class Spawner:
         await self._confirm_paste_if_needed(terminal)
         return pid
 
+    async def capture_output(self, terminal: str) -> str | None:
+        return await self.backend.capture_output(terminal)
+
+    async def send_command(self, terminal: str, text: str) -> None:
+        await self.backend.send_text(terminal, text)
+
     async def _wait_for_ready(self, terminal: str, timeout: int = 60) -> None:
         for _ in range(timeout):
-            pane_content = await self._capture_pane(terminal)
+            pane_content = await self.backend.capture_output(terminal)
             if pane_content and "\u276f" in pane_content:
                 return
             await asyncio.sleep(1)
         raise TimeoutError(f"Agent in terminal {terminal!r} did not become ready within {timeout}s")
 
-    async def _capture_pane(self, terminal: str) -> str | None:
-        proc = await asyncio.create_subprocess_exec(
-            "tmux", "capture-pane", "-t", f"{TMUX_SESSION}:{terminal}", "-p",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await proc.communicate()
-        if proc.returncode != 0:
-            return None
-        return stdout.decode()
-
     async def _confirm_paste_if_needed(self, terminal: str) -> None:
         await asyncio.sleep(2)
-        content = await self._capture_pane(terminal)
+        content = await self.backend.capture_output(terminal)
         if content and "[Pasted text" in content:
             log.info("Paste confirmation detected in %s, sending Enter", terminal)
-            proc = await asyncio.create_subprocess_exec(
-                "tmux", "send-keys", "-t", f"{TMUX_SESSION}:{terminal}", "Enter",
-            )
-            await proc.wait()
+            await self.backend.send_text(terminal, "")
 
     async def notify_agent(self, plan_name: str, agent_type: AgentType, message: str) -> None:
         await self.backend.send_text(self.terminal_name(plan_name, agent_type), message)
