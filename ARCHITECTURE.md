@@ -515,6 +515,9 @@ foreman start              # Start Foreman (enters the event loop)
 foreman plan               # Dry run — show execution order
 foreman status             # Show running/completed agents
 foreman kill migration-redis  # Kill a stuck agent
+foreman pause migration-redis # Pause agent, preserve worktree
+foreman resume migration-redis # Resume paused agent
+foreman guide migration-redis "Focus on the caching layer first"
 foreman reset              # Reset DB and clean up worktrees
 ```
 
@@ -559,9 +562,10 @@ Built with **cyclopts**.
 - [x] Rich Live dashboard with worker/review slot counts, plan status, time-ago display
 - [x] Brain session summarization on graceful shutdown (context preserved to `.foreman/context.md`)
 
-### Phase 6: Interactive Mode
-- [ ] Pause/resume agents
-- [ ] Inject guidance mid-execution
+### Phase 6: Interactive Mode ✓
+- [x] `foreman pause <plan>` — kill agent, mark INTERRUPTED, preserve worktree
+- [x] `foreman resume <plan>` — re-spawn agent in existing worktree
+- [x] `foreman guide <plan> <message>` — send guidance to running agent via terminal
 
 ## Tech Stack
 

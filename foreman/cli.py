@@ -12,10 +12,11 @@ from rich.console import Console
 from rich.table import Table
 
 from foreman.config import load_config
-from foreman.coordination import CoordinationDB
+from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.loop import ForemanLoop
 from foreman.plan_parser import load_plans
 from foreman.resolver import CircularDependencyError, compute_waves
+from foreman.spawner import Spawner
 
 app = cyclopts.App(
     name="foreman",
@@ -133,9 +134,6 @@ def kill(plan_name: str, repo: Path = Path(".")) -> None:
     _setup_logging()
     config = load_config(repo.resolve())
 
-    from foreman.coordination import AgentType
-    from foreman.spawner import Spawner
-
     async def _kill_all() -> None:
         spawner = Spawner(config)
         for agent_type in AgentType:
@@ -143,6 +141,108 @@ def kill(plan_name: str, repo: Path = Path(".")) -> None:
 
     asyncio.run(_kill_all())
     console.print(f"Killed agents for [bold]{plan_name}[/bold]")
+
+
+@app.command
+def pause(plan_name: str, repo: Path = Path(".")) -> None:
+    """Pause a running agent — kills the process, marks INTERRUPTED. Worktree is preserved."""
+    _setup_logging()
+    config = load_config(repo.resolve())
+    db = CoordinationDB(config.coordination_db)
+
+    status = db.get_plan_status(plan_name)
+    if status not in (PlanStatus.RUNNING, PlanStatus.REVIEWING):
+        console.print(f"[yellow]Plan {plan_name} is not running[/yellow] (status: {status})")
+        db.close()
+        return
+
+    async def _pause() -> None:
+        spawner = Spawner(config)
+        for agent_type in AgentType:
+            await spawner.kill_agent(plan_name, agent_type)
+
+    asyncio.run(_pause())
+    db.set_plan_status(plan_name, PlanStatus.INTERRUPTED)
+    db.close()
+    console.print(f"Paused [bold]{plan_name}[/bold] — worktree preserved, use 'foreman resume' to continue")
+
+
+@app.command
+def resume(plan_name: str, repo: Path = Path(".")) -> None:
+    """Resume an interrupted agent in its existing worktree."""
+    _setup_logging()
+    config = load_config(repo.resolve())
+    db = CoordinationDB(config.coordination_db)
+
+    plan_data = db.get_plan(plan_name)
+    if not plan_data:
+        console.print(f"[red]Plan {plan_name} not found[/red]")
+        db.close()
+        return
+
+    if PlanStatus(plan_data["status"]) != PlanStatus.INTERRUPTED:
+        console.print(f"[yellow]Plan {plan_name} is not interrupted[/yellow] (status: {plan_data['status']})")
+        db.close()
+        return
+
+    worktree_path = plan_data.get("worktree_path")
+    branch = plan_data.get("branch")
+    if not worktree_path or not Path(worktree_path).exists():
+        console.print(f"[red]Worktree not found for {plan_name}[/red]")
+        db.close()
+        return
+
+    from foreman.plan_parser import load_plans
+    plans = {p.name: p for p in load_plans(config.plans_dir)}
+    plan = plans.get(plan_name)
+    if not plan:
+        console.print(f"[red]Plan file not found for {plan_name}[/red]")
+        db.close()
+        return
+
+    plan_file = plan.file_path.resolve()
+    initial_message = (
+        f"You are resuming work on this plan. "
+        f"Read the plan at {plan_file} and review what has already been done on branch {branch}. "
+        f"Continue where the previous agent left off. Commit all changes when done."
+    )
+
+    async def _resume() -> None:
+        spawner = Spawner(config)
+        await spawner.setup()
+        pid = await spawner.spawn_agent(
+            plan, Path(worktree_path), AgentType.IMPLEMENTATION, initial_message,
+        )
+        db.set_plan_status(plan_name, PlanStatus.RUNNING)
+        db.add_agent(plan_name, AgentType.IMPLEMENTATION, pid=pid)
+
+    asyncio.run(_resume())
+    db.close()
+    console.print(f"Resumed [bold]{plan_name}[/bold] in existing worktree")
+
+
+@app.command
+def guide(plan_name: str, message: str, repo: Path = Path(".")) -> None:
+    """Send guidance to a running agent."""
+    _setup_logging()
+    config = load_config(repo.resolve())
+    db = CoordinationDB(config.coordination_db)
+
+    status = db.get_plan_status(plan_name)
+    if status not in (PlanStatus.RUNNING, PlanStatus.REVIEWING):
+        console.print(f"[yellow]Plan {plan_name} is not running[/yellow] (status: {status})")
+        db.close()
+        return
+
+    agent_type = db.get_active_agent_type(plan_name) or AgentType.IMPLEMENTATION
+
+    async def _guide() -> None:
+        spawner = Spawner(config)
+        await spawner.notify_agent(plan_name, agent_type, message)
+
+    asyncio.run(_guide())
+    db.close()
+    console.print(f"Sent guidance to [bold]{plan_name}[/bold] ({agent_type.value} agent)")
 
 
 @app.command
