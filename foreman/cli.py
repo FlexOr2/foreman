@@ -325,6 +325,58 @@ def guide(plan_name: str, message: str, repo: Path = Path(".")) -> None:
 
 
 @app.command
+def analyze(
+    focus: str,
+    repo: Path = Path("."),
+    web: bool = False,
+    path: str | None = None,
+    dry_run: bool = False,
+) -> None:
+    """Analyze the codebase with a focus area and generate draft plans."""
+    from foreman.analyze import FocusArea, run_analysis
+
+    _setup_logging()
+    config = load_config(repo.resolve())
+
+    focus_label = focus
+    try:
+        focus_label = FocusArea(focus.lower()).value
+    except ValueError:
+        pass
+
+    console.print(f"[bold]Analyzing[/bold] with focus: [cyan]{focus_label}[/cyan]")
+    if path:
+        console.print(f"  Scope: {path}")
+    if web:
+        console.print("  Web search: enabled")
+
+    if dry_run:
+        target = path or config.repo_root
+        console.print(f"\n[dim]Dry run — would analyze {target} and generate draft plans.[/dim]")
+        return
+
+    drafts = asyncio.run(run_analysis(config, focus, web=web, scope_path=path))
+
+    if not drafts:
+        console.print("\n[yellow]No actionable findings.[/yellow]")
+        return
+
+    table = Table(title="Generated Draft Plans")
+    table.add_column("File", style="cyan")
+    table.add_column("Status", style="green")
+
+    for draft in drafts:
+        table.add_row(str(draft.relative_to(config.repo_root)), "ready for review")
+
+    console.print()
+    console.print(table)
+    console.print(
+        f"\n[bold]{len(drafts)}[/bold] draft plans written. "
+        f"Review and rename (remove 'draft-' prefix) to approve."
+    )
+
+
+@app.command
 def reset(repo: Path = Path(".")) -> None:
     """Reset coordination DB and clean up worktrees."""
     _setup_logging()
