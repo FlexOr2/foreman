@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -98,3 +99,21 @@ class TestUnresolvedDependencies:
             Plan(name="b", file_path=Path("b.md")),
         ]
         validate_dag(plans)
+
+
+# --- Module encapsulation ---
+
+
+MONITOR_PATH = Path(__file__).resolve().parent.parent / "foreman" / "monitor.py"
+
+
+class TestMonitorEncapsulation:
+    def test_no_private_spawner_access(self) -> None:
+        source = MONITOR_PATH.read_text()
+        private_attr = re.findall(r"_spawner\._", source)
+        assert private_attr == [], f"monitor.py accesses private spawner attrs: {private_attr}"
+
+    def test_no_direct_backend_access(self) -> None:
+        source = MONITOR_PATH.read_text()
+        backend_access = re.findall(r"_spawner\.backend", source)
+        assert backend_access == [], f"monitor.py accesses spawner.backend directly: {backend_access}"

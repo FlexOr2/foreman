@@ -105,7 +105,7 @@ class CompletionDetector:
                 if not terminal:
                     continue
 
-                content = await self._spawner._capture_pane(terminal)
+                content = await self._spawner.capture_output(terminal)
                 if not content:
                     continue
 
@@ -117,7 +117,7 @@ class CompletionDetector:
                 if self._idle_counts[plan_name] >= IDLE_THRESHOLD_CONSECUTIVE:
                     log.info("Agent %s idle for %ds, sending /exit", plan_name, self._idle_counts[plan_name] * IDLE_POLL_INTERVAL)
                     self._idle_counts[plan_name] = 0
-                    await self._spawner.backend.send_text(terminal, "/exit")
+                    await self._spawner.send_command(terminal, "/exit")
 
 
 async def watch_plans(
