@@ -70,6 +70,7 @@ class ForemanLoop:
             loop.add_signal_handler(sig, self._request_shutdown)
 
         await self._scan_plans()
+        await self._process_stale_sentinels()
         await self._recover_running_plans()
 
         try:
@@ -206,44 +207,60 @@ class ForemanLoop:
 
         await watch_logs(self.config.log_dir, on_activity)
 
+    async def _process_stale_sentinels(self) -> None:
+        done_dir = self.config.repo_root / ".foreman" / "done"
+        if not done_dir.exists():
+            return
+        for sentinel in sorted(done_dir.iterdir()):
+            if sentinel.is_file():
+                log.info("Processing stale sentinel: %s", sentinel.name)
+                await self._handle_agent_done(sentinel.name)
+
+    async def _handle_agent_done(self, sentinel_name: str) -> None:
+        if AGENT_TYPE_SEP in sentinel_name:
+            plan_name, type_str = sentinel_name.split(AGENT_TYPE_SEP, 1)
+            agent_type = AgentType(type_str)
+        else:
+            plan_name = sentinel_name
+            agent_type = AgentType.IMPLEMENTATION
+
+        current_status = self.db.get_plan_status(plan_name)
+        if current_status in (PlanStatus.DONE, PlanStatus.FAILED, PlanStatus.BLOCKED):
+            log.info("Ignoring sentinel for %s (status already %s)", plan_name, current_status)
+            done_file = self.config.repo_root / ".foreman" / "done" / sentinel_name
+            done_file.unlink(missing_ok=True)
+            return
+
+        exit_code = self._read_exit_code(sentinel_name)
+        log.info("Agent %s/%s finished (exit code: %s)", plan_name, agent_type.value, exit_code)
+
+        agent_id = self._active_agent_ids.pop(plan_name, None)
+        if agent_id is not None:
+            self.db.finish_agent(agent_id, exit_code)
+
+        self.stuck.cancel(plan_name)
+        self.completion.cancel(plan_name)
+
+        sentinel_file = self.config.repo_root / ".foreman" / "done" / sentinel_name
+        sentinel_file.unlink(missing_ok=True)
+
+        if exit_code != 0:
+            self.db.set_plan_status(plan_name, PlanStatus.FAILED)
+            log.error("Agent %s/%s failed (exit code %s)", plan_name, agent_type.value, exit_code)
+        elif agent_type == AgentType.IMPLEMENTATION:
+            await self._on_implementation_done(plan_name)
+        elif agent_type == AgentType.REVIEW:
+            await self._on_review_done(plan_name)
+        elif agent_type == AgentType.FIX:
+            await self._on_fix_done(plan_name)
+
+        self._schedule_event.set()
+
     async def _done_watcher(self) -> None:
         done_dir = self.config.repo_root / ".foreman" / "done"
 
         async def on_done(sentinel_name: str) -> None:
-            if AGENT_TYPE_SEP in sentinel_name:
-                plan_name, type_str = sentinel_name.split(AGENT_TYPE_SEP, 1)
-                agent_type = AgentType(type_str)
-            else:
-                plan_name = sentinel_name
-                agent_type = AgentType.IMPLEMENTATION
-
-            exit_code = self._read_exit_code(sentinel_name)
-            log.info(
-                "Agent %s/%s finished (exit code: %s)",
-                plan_name, agent_type.value, exit_code,
-            )
-
-            agent_id = self._active_agent_ids.pop(plan_name, None)
-            if agent_id is not None:
-                self.db.finish_agent(agent_id, exit_code)
-
-            self.stuck.cancel(plan_name)
-            self.completion.cancel(plan_name)
-
-            sentinel_file = done_dir / sentinel_name
-            sentinel_file.unlink(missing_ok=True)
-
-            if exit_code != 0:
-                self.db.set_plan_status(plan_name, PlanStatus.FAILED)
-                log.error("Agent %s/%s failed (exit code %s)", plan_name, agent_type.value, exit_code)
-            elif agent_type == AgentType.IMPLEMENTATION:
-                await self._on_implementation_done(plan_name)
-            elif agent_type == AgentType.REVIEW:
-                await self._on_review_done(plan_name)
-            elif agent_type == AgentType.FIX:
-                await self._on_fix_done(plan_name)
-
-            self._schedule_event.set()
+            await self._handle_agent_done(sentinel_name)
 
         await watch_done(done_dir, on_done)
 
