@@ -2,18 +2,22 @@
 
 AI agent orchestrator for parallel Claude Code execution. You write plans, Foreman spawns workers, reviews results, resolves merge conflicts, and commits — all in visible tmux windows you can watch and intervene in.
 
-## Prerequisites
-
-- Python 3.12+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
-- tmux
-- git
-
 ## Install
 
 ```bash
+# System dependencies (one-time)
+sudo apt install tmux git           # Ubuntu/Debian
+# sudo pacman -S tmux git           # Arch
+# brew install tmux git             # macOS
+
+# Claude Code CLI (if not using VS Code extension)
+npm install -g @anthropic-ai/claude-code
+
+# Foreman itself
 pip install -e .
 ```
+
+Foreman auto-discovers the Claude CLI from the VS Code extension, `~/.claude/local/`, or PATH — no manual PATH setup needed.
 
 ## Quickstart
 
