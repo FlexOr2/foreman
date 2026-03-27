@@ -6,6 +6,13 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from foreman.coordination import AgentType
+
+CLAUDE_BIN = "claude"
+
+PROCESS_POLL_INTERVAL = 2
+SQLITE_BUSY_TIMEOUT_MS = 5000
+
 
 @dataclass
 class TimeoutConfig:
@@ -34,16 +41,16 @@ class Config:
     branch_prefix: str = "feat/"
 
     prompts: dict[str, str] = field(default_factory=lambda: {
-        "implementation": "plans/prompt-implementation.md",
-        "review": "plans/prompt-review.md",
-        "fix": "plans/prompt-fix.md",
+        AgentType.IMPLEMENTATION: "plans/prompt-implementation.md",
+        AgentType.REVIEW: "plans/prompt-review.md",
+        AgentType.FIX: "plans/prompt-fix.md",
     })
 
     timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
     agents: AgentConfig = field(default_factory=AgentConfig)
 
     allowed_tools: dict[str, str] = field(default_factory=lambda: {
-        "review": "Read,Glob,Grep,Bash,Write",
+        AgentType.REVIEW: "Read,Glob,Grep,Bash,Write",
     })
 
     plan_overrides: dict[str, dict] = field(default_factory=dict)
@@ -51,7 +58,6 @@ class Config:
     repo_root: Path = field(default_factory=lambda: Path.cwd())
 
     def resolve_paths(self) -> None:
-        """Resolve all relative paths against repo_root."""
         self.plans_dir = self.repo_root / self.plans_dir
         self.coordination_db = self.repo_root / self.coordination_db
         self.log_dir = self.repo_root / self.log_dir
@@ -59,22 +65,17 @@ class Config:
         self.scripts_dir = self.repo_root / self.scripts_dir
 
     def ensure_dirs(self) -> None:
-        """Create required directories."""
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.worktree_dir.mkdir(parents=True, exist_ok=True)
-        self.scripts_dir.mkdir(parents=True, exist_ok=True)
-        self.coordination_db.parent.mkdir(parents=True, exist_ok=True)
+        for d in (self.log_dir, self.worktree_dir, self.scripts_dir, self.coordination_db.parent):
+            d.mkdir(parents=True, exist_ok=True)
 
-    def get_timeout(self, plan_name: str, agent_type: str) -> int:
-        """Get timeout for a plan, checking overrides first."""
+    def get_timeout(self, plan_name: str, agent_type: AgentType) -> int:
         override = self.plan_overrides.get(plan_name, {})
         if "timeout" in override:
             return override["timeout"]
-        return getattr(self.timeouts, agent_type, self.timeouts.implementation)
+        return getattr(self.timeouts, agent_type.value, self.timeouts.implementation)
 
 
 def load_config(repo_root: Path | None = None) -> Config:
-    """Load config from foreman.toml, falling back to defaults."""
     if repo_root is None:
         repo_root = Path.cwd()
 

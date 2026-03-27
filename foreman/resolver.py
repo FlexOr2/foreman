@@ -11,8 +11,11 @@ class CircularDependencyError(Exception):
         super().__init__(f"Circular dependency detected: {' -> '.join(cycle)}")
 
 
+def _unmet_deps(plan: Plan, completed: set[str]) -> list[str]:
+    return [d for d in plan.depends_on if d not in completed]
+
+
 def validate_dag(plans: list[Plan]) -> None:
-    """Check for circular dependencies using DFS. Raises CircularDependencyError."""
     plan_names = {p.name for p in plans}
     adjacency = {p.name: [d for d in p.depends_on if d in plan_names] for p in plans}
 
@@ -42,19 +45,15 @@ def get_ready_plans(
     completed: set[str],
     running: set[str],
 ) -> list[Plan]:
-    """Return plans whose dependencies are all completed and aren't running or done."""
-    ready = []
-    for plan in all_plans:
-        if plan.name in completed or plan.name in running:
-            continue
-        unmet = [d for d in plan.depends_on if d not in completed]
-        if not unmet:
-            ready.append(plan)
-    return ready
+    return [
+        plan for plan in all_plans
+        if plan.name not in completed
+        and plan.name not in running
+        and not _unmet_deps(plan, completed)
+    ]
 
 
 def compute_waves(plans: list[Plan]) -> list[list[Plan]]:
-    """Compute execution waves for display (dry run). Returns list of waves."""
     validate_dag(plans)
 
     plan_map = {p.name: p for p in plans}
@@ -63,17 +62,13 @@ def compute_waves(plans: list[Plan]) -> list[list[Plan]]:
     waves: list[list[Plan]] = []
 
     while remaining:
-        wave = []
-        for name in list(remaining):
-            plan = plan_map[name]
-            unmet = [d for d in plan.depends_on if d not in completed]
-            if not unmet:
-                wave.append(plan)
+        wave = [
+            plan_map[name] for name in remaining
+            if not _unmet_deps(plan_map[name], completed)
+        ]
 
         if not wave:
-            # Remaining plans have unresolvable dependencies (missing plans)
-            wave = [plan_map[name] for name in remaining]
-            waves.append(wave)
+            waves.append([plan_map[name] for name in remaining])
             break
 
         waves.append(wave)

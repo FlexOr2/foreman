@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from foreman.config import load_config
-from foreman.coordination import CoordinationDB, PlanStatus
+from foreman.coordination import CoordinationDB
 from foreman.loop import ForemanLoop
 from foreman.plan_parser import load_plans
 from foreman.resolver import CircularDependencyError, compute_waves
@@ -33,6 +33,17 @@ def _setup_logging(debug: bool = False) -> None:
     )
 
 
+STATUS_STYLES = {
+    "QUEUED": "white",
+    "RUNNING": "cyan",
+    "REVIEWING": "blue",
+    "DONE": "green",
+    "BLOCKED": "yellow",
+    "FAILED": "red",
+    "INTERRUPTED": "magenta",
+}
+
+
 @app.command
 def start(
     repo: Path = Path("."),
@@ -49,14 +60,11 @@ def start(
     console.print(f"  Model: {config.agents.model}")
     console.print()
 
-    loop = ForemanLoop(config)
-    asyncio.run(loop.run())
+    asyncio.run(ForemanLoop(config).run())
 
 
 @app.command
-def plan(
-    repo: Path = Path("."),
-) -> None:
+def plan(repo: Path = Path(".")) -> None:
     """Dry run — analyze plans and show execution order."""
     _setup_logging()
     config = load_config(repo.resolve())
@@ -79,9 +87,7 @@ def plan(
 
     for i, wave in enumerate(waves):
         plan_names = ", ".join(p.name for p in wave)
-        deps = ", ".join(
-            set(d for p in wave for d in p.depends_on)
-        ) or "—"
+        deps = ", ".join(set(d for p in wave for d in p.depends_on)) or "—"
         table.add_row(str(i), plan_names, deps)
 
     console.print(table)
@@ -89,9 +95,7 @@ def plan(
 
 
 @app.command
-def status(
-    repo: Path = Path("."),
-) -> None:
+def status(repo: Path = Path(".")) -> None:
     """Show status of running/completed agents."""
     config = load_config(repo.resolve())
 
@@ -108,19 +112,9 @@ def status(
     table.add_column("Updated")
     table.add_column("Reason", style="dim")
 
-    status_styles = {
-        "QUEUED": "white",
-        "RUNNING": "cyan",
-        "REVIEWING": "blue",
-        "DONE": "green",
-        "BLOCKED": "yellow",
-        "FAILED": "red",
-        "INTERRUPTED": "magenta",
-    }
-
     for plan_data in db.get_all_plans():
         status_str = plan_data["status"]
-        style = status_styles.get(status_str, "white")
+        style = STATUS_STYLES.get(status_str, "white")
         table.add_row(
             plan_data["plan"],
             f"[{style}]{status_str}[/{style}]",
@@ -134,24 +128,18 @@ def status(
 
 
 @app.command
-def kill(
-    plan_name: str,
-    repo: Path = Path("."),
-) -> None:
+def kill(plan_name: str, repo: Path = Path(".")) -> None:
     """Kill a stuck agent."""
     _setup_logging()
     config = load_config(repo.resolve())
 
     from foreman.spawner import Spawner
-    spawner = Spawner(config)
-    asyncio.run(spawner.kill_agent(plan_name))
+    asyncio.run(Spawner(config).kill_agent(plan_name))
     console.print(f"Killed agent for [bold]{plan_name}[/bold]")
 
 
 @app.command
-def reset(
-    repo: Path = Path("."),
-) -> None:
+def reset(repo: Path = Path(".")) -> None:
     """Reset coordination DB and clean up worktrees."""
     _setup_logging()
     config = load_config(repo.resolve())
@@ -162,24 +150,23 @@ def reset(
         db.close()
         console.print("Coordination DB reset.")
 
-    # Clean up worktrees
     import shutil
+
+    async def cleanup() -> None:
+        from foreman.worktree import list_worktrees, remove_worktree
+        worktrees = await list_worktrees(config)
+        await asyncio.gather(*[remove_worktree(wt.plan_name, config) for wt in worktrees])
+
     if config.worktree_dir.exists():
-        # Use git to properly remove worktrees
-        async def cleanup() -> None:
-            from foreman.worktree import list_worktrees, remove_worktree
-            worktrees = await list_worktrees(config.worktree_dir)
-            for wt in worktrees:
-                await remove_worktree(
-                    wt.plan_name, config.worktree_dir,
-                    config.branch_prefix, config.repo_root,
-                )
         asyncio.run(cleanup())
         console.print("Worktrees cleaned up.")
 
-    # Clean up scripts
     if config.scripts_dir.exists():
         shutil.rmtree(config.scripts_dir)
         console.print("Scripts cleaned up.")
+
+    done_dir = config.repo_root / ".foreman" / "done"
+    if done_dir.exists():
+        shutil.rmtree(done_dir)
 
     console.print("[green]Reset complete.[/green]")

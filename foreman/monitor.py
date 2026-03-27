@@ -9,12 +9,14 @@ from typing import Callable, Coroutine
 
 from asyncinotify import Inotify, Mask
 
+from foreman.plan_parser import is_plan_file
+
 log = logging.getLogger(__name__)
+
+DONE_DIR_NAME = "done"
 
 
 class StuckDetector:
-    """Tracks log file activity per agent. Fires callback when no activity for threshold."""
-
     def __init__(
         self,
         threshold_seconds: int,
@@ -23,21 +25,37 @@ class StuckDetector:
         self.threshold = threshold_seconds
         self._on_stuck = on_stuck
         self._timers: dict[str, asyncio.TimerHandle] = {}
+        self._active_plans: set[str] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+        return self._loop
+
+    def track(self, plan_name: str) -> None:
+        self._active_plans.add(plan_name)
 
     def on_log_activity(self, plan_name: str) -> None:
+        if plan_name not in self._active_plans:
+            return
+
         if plan_name in self._timers:
             self._timers[plan_name].cancel()
 
-        loop = asyncio.get_event_loop()
+        loop = self._get_loop()
         self._timers[plan_name] = loop.call_later(
             self.threshold, self._fire_stuck, plan_name,
         )
 
     def _fire_stuck(self, plan_name: str) -> None:
+        if plan_name not in self._active_plans:
+            return
         log.warning("Agent %s appears stuck (no log activity for %ds)", plan_name, self.threshold)
-        asyncio.ensure_future(self._on_stuck(plan_name))
+        self._get_loop().create_task(self._on_stuck(plan_name))
 
     def cancel(self, plan_name: str) -> None:
+        self._active_plans.discard(plan_name)
         timer = self._timers.pop(plan_name, None)
         if timer:
             timer.cancel()
@@ -46,13 +64,13 @@ class StuckDetector:
         for timer in self._timers.values():
             timer.cancel()
         self._timers.clear()
+        self._active_plans.clear()
 
 
 async def watch_plans(
     plans_dir: Path,
     on_event: Callable[[Path, Mask], Coroutine],
 ) -> None:
-    """Watch the plans directory for new, renamed, or modified files."""
     plans_dir.mkdir(parents=True, exist_ok=True)
 
     with Inotify() as inotify:
@@ -66,7 +84,7 @@ async def watch_plans(
             if event.name is None:
                 continue
             file_path = plans_dir / str(event.name)
-            if not str(event.name).endswith(".md"):
+            if not is_plan_file(file_path):
                 continue
             log.debug("Plan event: %s on %s", event.mask, file_path)
             await on_event(file_path, event.mask)
@@ -76,7 +94,6 @@ async def watch_logs(
     log_dir: Path,
     on_activity: Callable[[str], None],
 ) -> None:
-    """Watch log files for modifications (stuck detection)."""
     log_dir.mkdir(parents=True, exist_ok=True)
 
     with Inotify() as inotify:
@@ -89,28 +106,24 @@ async def watch_logs(
             filename = str(event.name)
             if not filename.endswith(".log"):
                 continue
-            # Extract plan name from log filename (e.g., "redis-implementation.log" -> "redis")
             plan_name = filename.rsplit("-", 1)[0] if "-" in filename else filename.removesuffix(".log")
             on_activity(plan_name)
 
 
-async def wait_for_process(pid: int) -> int:
-    """Wait for a process to exit. Returns exit code.
+async def watch_done(
+    done_dir: Path,
+    on_done: Callable[[str], Coroutine],
+) -> None:
+    """Watch .foreman/done/ for sentinel files written by agent launcher scripts on exit."""
+    done_dir.mkdir(parents=True, exist_ok=True)
 
-    Uses polling with os.waitpid since the PID is not our direct child
-    (it's spawned inside tmux). Falls back to checking /proc/{pid}.
-    """
-    import os
+    with Inotify() as inotify:
+        inotify.add_watch(done_dir, Mask.CREATE | Mask.MOVED_TO)
+        log.info("Watching done directory: %s", done_dir)
 
-    while True:
-        try:
-            result_pid, status = os.waitpid(pid, os.WNOHANG)
-            if result_pid != 0:
-                if os.WIFEXITED(status):
-                    return os.WEXITSTATUS(status)
-                return -1
-        except ChildProcessError:
-            # Not our child — check if process still exists via /proc
-            if not Path(f"/proc/{pid}").exists():
-                return -1
-        await asyncio.sleep(2)
+        async for event in inotify:
+            if event.name is None:
+                continue
+            plan_name = str(event.name)
+            log.info("Agent done sentinel: %s", plan_name)
+            await on_done(plan_name)

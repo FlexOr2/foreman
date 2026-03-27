@@ -60,7 +60,8 @@ class CoordinationDB:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), isolation_level=None)
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA busy_timeout=5000")
+        from foreman.config import SQLITE_BUSY_TIMEOUT_MS
+        self._conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
 
@@ -77,7 +78,6 @@ class CoordinationDB:
             self._conn.execute("ROLLBACK")
             raise
 
-    # --- Plan operations ---
 
     def upsert_plan(
         self,
@@ -140,7 +140,6 @@ class CoordinationDB:
         return {r["plan"] for r in rows}
 
     def mark_all_running_as_interrupted(self) -> int:
-        """Mark all RUNNING/REVIEWING plans as INTERRUPTED. Returns count."""
         with self._tx() as conn:
             cursor = conn.execute(
                 "UPDATE plans SET status=?, updated_at=? WHERE status IN (?, ?)",
@@ -148,7 +147,6 @@ class CoordinationDB:
             )
             return cursor.rowcount
 
-    # --- Agent operations ---
 
     def add_agent(
         self,
@@ -157,7 +155,6 @@ class CoordinationDB:
         pid: int | None = None,
         log_file: str | None = None,
     ) -> int:
-        """Record a new agent. Returns the agent ID."""
         cursor = self._conn.execute(
             """INSERT INTO agents (plan, type, pid, log_file, started_at)
                VALUES (?, ?, ?, ?, ?)""",
@@ -187,5 +184,4 @@ class CoordinationDB:
         return [dict(r) for r in rows]
 
     def reset(self) -> None:
-        """Clear all data."""
         self._conn.executescript("DELETE FROM agents; DELETE FROM plans;")

@@ -8,19 +8,18 @@ import shlex
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from foreman.config import Config
+from foreman.config import CLAUDE_BIN, Config
+from foreman.coordination import AgentType
 from foreman.plan_parser import Plan
 
 log = logging.getLogger(__name__)
 
-CLAUDE_BIN = "claude"
+TMUX_SESSION = "foreman"
 
 
 class Backend(ABC):
     @abstractmethod
-    async def create_terminal(
-        self, name: str, command: str, log_file: Path,
-    ) -> None: ...
+    async def create_terminal(self, name: str, command: str, log_file: Path) -> None: ...
 
     @abstractmethod
     async def get_pid(self, name: str) -> int | None: ...
@@ -39,19 +38,9 @@ class Backend(ABC):
 
 
 class TmuxBackend(Backend):
-    SESSION = "foreman"
-
     async def setup(self) -> None:
-        """Create the foreman tmux session if it doesn't exist."""
-        rc = (await asyncio.create_subprocess_exec(
-            "tmux", "has-session", "-t", self.SESSION,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )).returncode if False else 1
-
-        # Actually check
         proc = await asyncio.create_subprocess_exec(
-            "tmux", "has-session", "-t", self.SESSION,
+            "tmux", "has-session", "-t", TMUX_SESSION,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -59,27 +48,24 @@ class TmuxBackend(Backend):
 
         if proc.returncode != 0:
             proc = await asyncio.create_subprocess_exec(
-                "tmux", "new-session", "-d", "-s", self.SESSION, "-n", "dashboard",
+                "tmux", "new-session", "-d", "-s", TMUX_SESSION, "-n", "dashboard",
             )
             await proc.wait()
-            log.info("Created tmux session: %s", self.SESSION)
+            log.info("Created tmux session: %s", TMUX_SESSION)
         else:
-            log.info("Reusing existing tmux session: %s", self.SESSION)
+            log.info("Reusing existing tmux session: %s", TMUX_SESSION)
 
     async def teardown(self) -> None:
-        pass  # Leave tmux session alive for user
+        pass
 
-    async def create_terminal(
-        self, name: str, command: str, log_file: Path,
-    ) -> None:
+    async def create_terminal(self, name: str, command: str, log_file: Path) -> None:
         proc = await asyncio.create_subprocess_exec(
-            "tmux", "new-window", "-t", self.SESSION, "-n", name, command,
+            "tmux", "new-window", "-t", TMUX_SESSION, "-n", name, command,
         )
         await proc.wait()
 
-        # Enable log capture via pipe-pane
         proc = await asyncio.create_subprocess_exec(
-            "tmux", "pipe-pane", "-t", f"{self.SESSION}:{name}",
+            "tmux", "pipe-pane", "-t", f"{TMUX_SESSION}:{name}",
             "-o", f"cat >> {log_file}",
         )
         await proc.wait()
@@ -88,7 +74,7 @@ class TmuxBackend(Backend):
 
     async def get_pid(self, name: str) -> int | None:
         proc = await asyncio.create_subprocess_exec(
-            "tmux", "list-panes", "-t", f"{self.SESSION}:{name}",
+            "tmux", "list-panes", "-t", f"{TMUX_SESSION}:{name}",
             "-F", "#{pane_pid}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -96,29 +82,26 @@ class TmuxBackend(Backend):
         stdout, _ = await proc.communicate()
         if proc.returncode != 0:
             return None
-        pid_str = stdout.decode().strip()
         try:
-            return int(pid_str)
+            return int(stdout.decode().strip())
         except ValueError:
             return None
 
     async def send_text(self, name: str, text: str) -> None:
         proc = await asyncio.create_subprocess_exec(
-            "tmux", "send-keys", "-t", f"{self.SESSION}:{name}", text, "Enter",
+            "tmux", "send-keys", "-t", f"{TMUX_SESSION}:{name}", text, "Enter",
         )
         await proc.wait()
 
     async def kill_terminal(self, name: str) -> None:
         proc = await asyncio.create_subprocess_exec(
-            "tmux", "kill-window", "-t", f"{self.SESSION}:{name}",
+            "tmux", "kill-window", "-t", f"{TMUX_SESSION}:{name}",
             stderr=asyncio.subprocess.DEVNULL,
         )
         await proc.wait()
 
 
 class VSCodeBackend(Backend):
-    """Communicates with the foreman-vscode extension via Unix socket."""
-
     def __init__(self, socket_path: Path) -> None:
         self.socket_path = socket_path
 
@@ -139,17 +122,11 @@ class VSCodeBackend(Backend):
     async def teardown(self) -> None:
         pass
 
-    async def create_terminal(
-        self, name: str, command: str, log_file: Path,
-    ) -> None:
-        await self._send({
-            "action": "create_terminal",
-            "name": name,
-            "command": command,
-        })
+    async def create_terminal(self, name: str, command: str, log_file: Path) -> None:
+        await self._send({"action": "create_terminal", "name": name, "command": command})
 
     async def get_pid(self, name: str) -> int | None:
-        return None  # VS Code backend doesn't support PID querying
+        return None
 
     async def send_text(self, name: str, text: str) -> None:
         await self._send({"action": "send_text", "name": name, "text": text})
@@ -158,16 +135,24 @@ class VSCodeBackend(Backend):
         await self._send({"action": "kill_terminal", "name": name})
 
 
+def _log_filename(plan_name: str, agent_type: AgentType) -> str:
+    return f"{plan_name}-{agent_type.value}.log"
+
+
+def _script_filename(plan_name: str, agent_type: AgentType) -> str:
+    return f"{plan_name}-{agent_type.value}.sh"
+
+
 def _build_launcher_script(
     plan: Plan,
     worktree_path: Path,
-    agent_type: str,
+    agent_type: AgentType,
     config: Config,
     initial_message: str,
 ) -> str:
-    """Generate the launcher bash script content."""
     prompt_path = (config.repo_root / config.prompts.get(agent_type, "")).resolve()
     plans_dir = config.plans_dir.resolve()
+    done_dir = (config.repo_root / ".foreman" / "done").resolve()
     tools = config.allowed_tools.get(agent_type, "")
 
     lines = [
@@ -176,7 +161,7 @@ def _build_launcher_script(
     ]
 
     cmd_parts = [
-        f"exec {CLAUDE_BIN}",
+        CLAUDE_BIN,
         f'  --append-system-prompt "$(cat {shlex.quote(str(prompt_path))})"',
         f"  --permission-mode {shlex.quote(config.agents.permission_mode)}",
         f"  --model {shlex.quote(config.agents.model)}",
@@ -190,6 +175,8 @@ def _build_launcher_script(
     cmd_parts.append(f"  {shlex.quote(initial_message)}")
 
     lines.append(" \\\n".join(cmd_parts))
+    # Write sentinel file on exit so inotify can detect completion
+    lines.append(f"touch {shlex.quote(str(done_dir / plan.name))}")
     return "\n".join(lines) + "\n"
 
 
@@ -204,6 +191,7 @@ class Spawner:
 
     async def setup(self) -> None:
         await self.backend.setup()
+        (self.config.repo_root / ".foreman" / "done").mkdir(parents=True, exist_ok=True)
 
     async def teardown(self) -> None:
         await self.backend.teardown()
@@ -212,20 +200,19 @@ class Spawner:
         self,
         plan: Plan,
         worktree_path: Path,
-        agent_type: str,
+        agent_type: AgentType,
         initial_message: str,
     ) -> int | None:
-        """Write launcher script, spawn agent in terminal, return PID."""
         script_content = _build_launcher_script(
             plan, worktree_path, agent_type, self.config, initial_message,
         )
 
-        script_path = self.config.scripts_dir / f"{plan.name}-{agent_type}.sh"
+        script_path = self.config.scripts_dir / _script_filename(plan.name, agent_type)
         script_path.write_text(script_content)
         script_path.chmod(0o755)
 
-        log_file = self.config.log_dir / f"{plan.name}-{agent_type}.log"
-        # Ensure log file exists for inotify watch
+        log_file = self.config.log_dir / _log_filename(plan.name, agent_type)
+        # inotify needs the file to exist before it can watch
         log_file.touch()
 
         await self.backend.create_terminal(
@@ -234,9 +221,8 @@ class Spawner:
             log_file=log_file,
         )
 
-        # Query PID immediately after creation
         pid = await self.backend.get_pid(plan.name)
-        log.info("Spawned %s agent for %s (PID: %s)", agent_type, plan.name, pid)
+        log.info("Spawned %s agent for %s (PID: %s)", agent_type.value, plan.name, pid)
         return pid
 
     async def notify_agent(self, plan_name: str, message: str) -> None:
