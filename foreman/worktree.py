@@ -34,24 +34,27 @@ async def create_worktree(plan_name: str, config: Config) -> tuple[Path, str]:
     branch = f"{config.branch_prefix}{plan_name}"
     worktree_path = config.worktree_dir / plan_name
 
+    if worktree_path.exists():
+        log.warning("Worktree %s already exists, reusing", worktree_path)
+        return worktree_path, branch
+
     rc, _, stderr = await _run_git(
         "worktree", "add", str(worktree_path), "-b", branch,
         cwd=config.repo_root,
     )
-    if rc != 0:
-        if "already exists" in stderr:
-            log.warning("Branch %s already exists, checking out", branch)
-            rc, _, stderr = await _run_git(
-                "worktree", "add", str(worktree_path), branch,
-                cwd=config.repo_root,
-            )
-            if rc != 0:
-                raise RuntimeError(f"Failed to create worktree: {stderr}")
-        else:
-            raise RuntimeError(f"Failed to create worktree: {stderr}")
+    if rc == 0:
+        log.info("Created worktree at %s on branch %s", worktree_path, branch)
+        return worktree_path, branch
 
-    log.info("Created worktree at %s on branch %s", worktree_path, branch)
-    return worktree_path, branch
+    rc, _, stderr = await _run_git(
+        "worktree", "add", str(worktree_path), branch,
+        cwd=config.repo_root,
+    )
+    if rc == 0:
+        log.info("Created worktree at %s on existing branch %s", worktree_path, branch)
+        return worktree_path, branch
+
+    raise RuntimeError(f"Failed to create worktree: {stderr}")
 
 
 async def remove_worktree(plan_name: str, config: Config) -> None:

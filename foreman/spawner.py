@@ -8,7 +8,8 @@ import shlex
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from foreman.config import CLAUDE_BIN, Config
+import foreman.config as _config
+from foreman.config import Config
 from foreman.coordination import AgentType
 from foreman.plan_parser import Plan
 
@@ -164,7 +165,7 @@ def _build_launcher_script(
     ]
 
     cmd_parts = [
-        CLAUDE_BIN,
+        _config.CLAUDE_BIN,
         f'  --append-system-prompt "$(cat {shlex.quote(str(prompt_path))})"',
         f"  --permission-mode {shlex.quote(config.agents.permission_mode)}",
         f"  --model {shlex.quote(config.agents.model)}",

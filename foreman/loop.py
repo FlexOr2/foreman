@@ -212,8 +212,12 @@ class ForemanLoop:
         for plan in ready:
             if worker_count >= self.config.agents.max_parallel_workers:
                 break
-            await self._spawn_implementation(plan)
-            worker_count += 1
+            try:
+                await self._spawn_implementation(plan)
+                worker_count += 1
+            except Exception:
+                log.error("Failed to spawn %s", plan.name, exc_info=True)
+                self.db.set_plan_status(plan.name, PlanStatus.FAILED)
 
         reviewing_count = len(self.db.get_plans_by_status(PlanStatus.REVIEWING))
         while self._pending_reviews and reviewing_count < self.config.agents.max_parallel_reviews:

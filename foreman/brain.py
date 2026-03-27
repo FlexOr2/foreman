@@ -7,7 +7,7 @@ import json
 import logging
 from pathlib import Path
 
-from foreman.config import CLAUDE_BIN
+import foreman.config as _config
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class ForemanBrain:
 
     async def _invoke(self, prompt: str) -> str:
         cmd = [
-            CLAUDE_BIN, "-p", prompt,
+            _config.CLAUDE_BIN, "-p", prompt,
             "--output-format", "json",
             "--allowed-tools", self._allowed_tools,
             "--permission-mode", self._permission_mode,
