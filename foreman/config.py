@@ -1,4 +1,4 @@
-"""Configuration loading from foreman.toml."""
+"""Configuration loading from .foreman/config.toml."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ CLAUDE_BIN = "claude"
 
 PROCESS_POLL_INTERVAL = 2
 SQLITE_BUSY_TIMEOUT_MS = 5000
+
+FOREMAN_DIR = ".foreman"
 
 
 @dataclass
@@ -34,16 +36,17 @@ class AgentConfig:
 @dataclass
 class Config:
     plans_dir: Path = field(default_factory=lambda: Path("plans"))
-    coordination_db: Path = field(default_factory=lambda: Path(".foreman/coordination.db"))
-    log_dir: Path = field(default_factory=lambda: Path(".foreman/logs"))
-    worktree_dir: Path = field(default_factory=lambda: Path(".foreman/worktrees"))
-    scripts_dir: Path = field(default_factory=lambda: Path(".foreman/scripts"))
+    prompts_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/prompts"))
+    coordination_db: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/coordination.db"))
+    log_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/logs"))
+    worktree_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/worktrees"))
+    scripts_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/scripts"))
     branch_prefix: str = "feat/"
 
     prompts: dict[str, str] = field(default_factory=lambda: {
-        AgentType.IMPLEMENTATION: "plans/prompt-implementation.md",
-        AgentType.REVIEW: "plans/prompt-review.md",
-        AgentType.FIX: "plans/prompt-fix.md",
+        AgentType.IMPLEMENTATION: "prompt-implementation.md",
+        AgentType.REVIEW: "prompt-review.md",
+        AgentType.FIX: "prompt-fix.md",
     })
 
     timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
@@ -59,14 +62,19 @@ class Config:
 
     def resolve_paths(self) -> None:
         self.plans_dir = self.repo_root / self.plans_dir
+        self.prompts_dir = self.repo_root / self.prompts_dir
         self.coordination_db = self.repo_root / self.coordination_db
         self.log_dir = self.repo_root / self.log_dir
         self.worktree_dir = self.repo_root / self.worktree_dir
         self.scripts_dir = self.repo_root / self.scripts_dir
 
     def ensure_dirs(self) -> None:
-        for d in (self.log_dir, self.worktree_dir, self.scripts_dir, self.coordination_db.parent):
+        for d in (self.prompts_dir, self.log_dir, self.worktree_dir,
+                  self.scripts_dir, self.coordination_db.parent):
             d.mkdir(parents=True, exist_ok=True)
+
+    def get_prompt_path(self, agent_type: AgentType) -> Path:
+        return self.prompts_dir / self.prompts.get(agent_type, "")
 
     def get_timeout(self, plan_name: str, agent_type: AgentType) -> int:
         override = self.plan_overrides.get(plan_name, {})
@@ -79,7 +87,7 @@ def load_config(repo_root: Path | None = None) -> Config:
     if repo_root is None:
         repo_root = Path.cwd()
 
-    config_path = repo_root / "foreman.toml"
+    config_path = repo_root / FOREMAN_DIR / "config.toml"
     config = Config(repo_root=repo_root)
 
     if config_path.exists():
@@ -88,8 +96,8 @@ def load_config(repo_root: Path | None = None) -> Config:
 
         foreman = raw.get("foreman", {})
 
-        for key in ("plans_dir", "coordination_db", "log_dir", "worktree_dir",
-                     "scripts_dir", "branch_prefix"):
+        for key in ("plans_dir", "prompts_dir", "coordination_db", "log_dir",
+                     "worktree_dir", "scripts_dir", "branch_prefix"):
             if key in foreman:
                 value = foreman[key]
                 if key != "branch_prefix":

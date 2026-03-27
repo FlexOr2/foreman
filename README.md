@@ -1,60 +1,41 @@
 # Foreman
 
-AI agent orchestrator for parallel Claude Code execution. You write plans, Foreman spawns workers, reviews results, resolves merge conflicts, and commits — all in visible tmux windows you can watch and intervene in.
+AI agent orchestrator for parallel Claude Code execution. You write plans, Foreman spawns workers in git worktrees, reviews results, resolves merge conflicts, and commits — all in visible tmux windows you can watch and intervene in.
 
 ## Install
 
 ```bash
-# System dependencies (one-time)
+# System dependencies
 sudo apt install tmux git           # Ubuntu/Debian
 # sudo pacman -S tmux git           # Arch
 # brew install tmux git             # macOS
 
-# Claude Code CLI (if not using VS Code extension)
-npm install -g @anthropic-ai/claude-code
-
-# Foreman itself
-pip install -e .
+# Foreman
+uv pip install -e .
 ```
 
-Foreman auto-discovers the Claude CLI from the VS Code extension, `~/.claude/local/`, or PATH — no manual PATH setup needed.
+Claude Code CLI is auto-discovered from the VS Code extension, `~/.claude/local/`, or PATH.
 
 ## Quickstart
 
 ```bash
 cd your-repo
+foreman init              # Creates plans/, .foreman/ (prompts, config)
 
-# Initialize — creates plans/, prompt templates, foreman.toml
-foreman init
-
-# Write a plan
 cat > plans/add-logging.md << 'EOF'
 # Add Logging
-
-Add structured logging to all API endpoints using the `logging` module.
+Add structured logging to all API endpoints.
 EOF
 
-# Dry run — see execution order
-foreman plan
-
-# Start — spawns agents, shows live dashboard
-foreman start
+foreman plan              # Dry run — shows execution order
+foreman start             # Spawns agents, shows live dashboard
 ```
 
-Watch agents work: `tmux attach -t foreman`
-
-## How it works
-
-1. You drop markdown plan files into `plans/`
-2. Foreman parses dependencies (`> **Depends on: other-plan**`), builds a DAG
-3. Each plan gets a git worktree + a Claude Code agent in its own tmux window
-4. On completion: auto-review, fix cycle, then merge to main
-5. Merge conflicts are resolved by a persistent "brain" Claude session
-6. New plans can be added while agents are running — Foreman picks them up via inotify
+Watch agents: `tmux attach -t foreman`
 
 ## Commands
 
-```bash
+```
 foreman init                    # Set up repo for Foreman
 foreman start                   # Event loop + live dashboard
 foreman plan                    # Dry run — show execution order
@@ -70,7 +51,7 @@ foreman reset                   # Clean up everything
 
 ## Configuration
 
-`foreman.toml` (created by `foreman init`):
+`.foreman/config.toml` (created by `foreman init`):
 
 ```toml
 [foreman]
@@ -84,12 +65,12 @@ foreman reset                   # Clean up everything
 # permission_mode = "dontAsk"
 
 [foreman.timeouts]
-# implementation = 1800    # 30 min per plan
-# review = 600             # 10 min per review
-# stuck_threshold = 300    # 5 min no activity = stuck
+# implementation = 1800        # 30 min per plan
+# review = 600                 # 10 min per review
+# stuck_threshold = 300        # 5 min no activity = stuck
 ```
 
-## Plan format
+## Plan Format
 
 ```markdown
 # My Feature
@@ -97,29 +78,21 @@ foreman reset                   # Clean up everything
 > **Depends on: other-plan, setup-plan**
 
 Description of what to implement...
-
-### Phase 1
-...
-
-### Phase 2
-...
 ```
 
-- Filename = plan name (e.g., `add-logging.md` -> plan `add-logging`)
+- Filename = plan name (`add-logging.md` → plan `add-logging`)
 - `draft-*.md` files are ignored — rename to activate
 - Dependencies reference other plan names (filename without `.md`)
-- Plans without dependencies run immediately
+- No dependencies = runs immediately
 
-## VS Code Extension
+## How It Works
 
-For VS Code terminal tabs instead of tmux, install the extension from `foreman-vscode/`:
-
-```bash
-cd foreman-vscode && npm install && npm run compile
-```
-
-The extension auto-activates when `.foreman/` exists and Foreman automatically detects it.
-
-## Architecture
+1. Plans are parsed and dependencies resolved into a DAG
+2. Each ready plan gets a git worktree on its own branch
+3. A Claude Code agent is spawned in a tmux window per plan
+4. On completion: auto-review via a separate review agent
+5. Review passes → merge to main; findings → fix agent → re-review
+6. Merge conflicts → brain (persistent Claude session) resolves or escalates
+7. New plans can be dropped in at any time — Foreman picks them up via inotify
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.

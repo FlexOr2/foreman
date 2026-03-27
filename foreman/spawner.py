@@ -153,7 +153,7 @@ def _build_launcher_script(
     config: Config,
     initial_message: str,
 ) -> str:
-    prompt_path = (config.repo_root / config.prompts.get(agent_type, "")).resolve()
+    prompt_path = config.get_prompt_path(agent_type).resolve()
     plans_dir = config.plans_dir.resolve()
     done_dir = (config.repo_root / ".foreman" / "done").resolve()
     tools = config.allowed_tools.get(agent_type, "")

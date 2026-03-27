@@ -48,9 +48,10 @@ STATUS_STYLES = {
 
 @app.command
 def init(repo: Path = Path(".")) -> None:
-    """Initialize a repo for Foreman — creates plans/, copies prompt templates, validates prerequisites."""
-    import shutil
+    """Initialize a repo for Foreman — creates plans/, .foreman/, prompt templates, config."""
     from importlib.resources import files
+
+    from foreman.config import FOREMAN_DIR
 
     repo = repo.resolve()
 
@@ -63,21 +64,24 @@ def init(repo: Path = Path(".")) -> None:
 
     plans_dir = repo / "plans"
     plans_dir.mkdir(exist_ok=True)
+    console.print(f"  {plans_dir.relative_to(repo)}/")
+
+    foreman_dir = repo / FOREMAN_DIR
+    prompts_dir = foreman_dir / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
 
     templates = files("foreman") / "templates"
-    copied = 0
     for template in templates.iterdir():
         if template.name.startswith("prompt-") and template.name.endswith(".md"):
-            dest = plans_dir / template.name
+            dest = prompts_dir / template.name
             if not dest.exists():
                 dest.write_text(template.read_text())
                 console.print(f"  Created {dest.relative_to(repo)}")
-                copied += 1
 
-    config_path = repo / "foreman.toml"
+    config_path = foreman_dir / "config.toml"
     if not config_path.exists():
         config_path.write_text(_DEFAULT_CONFIG)
-        console.print(f"  Created foreman.toml")
+        console.print(f"  Created {config_path.relative_to(repo)}")
 
     gitignore = repo / ".gitignore"
     gitignore_entry = ".foreman/"
@@ -85,18 +89,18 @@ def init(repo: Path = Path(".")) -> None:
         content = gitignore.read_text()
         if gitignore_entry not in content:
             with open(gitignore, "a") as f:
-                f.write(f"\n# Foreman runtime data\n{gitignore_entry}\n")
+                f.write(f"\n# Foreman\n{gitignore_entry}\n")
             console.print("  Added .foreman/ to .gitignore")
     else:
-        gitignore.write_text(f"# Foreman runtime data\n{gitignore_entry}\n")
+        gitignore.write_text(f"# Foreman\n{gitignore_entry}\n")
         console.print("  Created .gitignore")
 
-    console.print(f"\n[green]Foreman initialized.[/green] Add plan files to {plans_dir.relative_to(repo)}/ and run 'foreman start'.")
+    console.print(f"\n[green]Foreman initialized.[/green] Add plan files to plans/ and run 'foreman start'.")
 
 
 _DEFAULT_CONFIG = """\
 [foreman]
-# plans_dir = "plans"
+# plans_dir = "plans"          # relative to repo root
 # branch_prefix = "feat/"
 
 [foreman.agents]
@@ -106,9 +110,9 @@ _DEFAULT_CONFIG = """\
 # permission_mode = "dontAsk"
 
 [foreman.timeouts]
-# implementation = 1800
-# review = 600
-# stuck_threshold = 300
+# implementation = 1800        # 30 min per plan
+# review = 600                 # 10 min per review
+# stuck_threshold = 300        # 5 min no activity = stuck
 """
 
 
