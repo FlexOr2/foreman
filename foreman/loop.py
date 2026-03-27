@@ -250,6 +250,7 @@ class ForemanLoop:
         if exit_code != 0:
             self.db.set_plan_status(plan_name, PlanStatus.FAILED)
             log.error("Agent %s/%s failed (exit code %s)", plan_name, agent_type.value, exit_code)
+            self._cascade_failure(plan_name)
         elif agent_type == AgentType.IMPLEMENTATION:
             await self._on_implementation_done(plan_name)
         elif agent_type == AgentType.REVIEW:
@@ -297,7 +298,7 @@ class ForemanLoop:
             return
 
         completed = self.db.get_completed_plan_names()
-        running = self.db.get_running_plan_names()
+        running = self.db.get_in_progress_plan_names()
 
         ready = get_ready_plans(list(self._plans.values()), completed, running)
 
@@ -315,6 +316,7 @@ class ForemanLoop:
             except Exception:
                 log.error("Failed to spawn %s", plan.name, exc_info=True)
                 self.db.set_plan_status(plan.name, PlanStatus.FAILED)
+                self._cascade_failure(plan.name)
 
         reviewing_count = len(self.db.get_plans_by_status(PlanStatus.REVIEWING))
         while self._pending_reviews and reviewing_count < self.config.agents.max_parallel_reviews:
@@ -431,6 +433,7 @@ class ForemanLoop:
                 plan_name, PlanStatus.BLOCKED,
                 reason="Review verdict unreadable or missing",
             )
+            self._cascade_failure(plan_name)
             return
 
         decision = verdict.get("verdict")
@@ -447,6 +450,7 @@ class ForemanLoop:
                     plan_name, PlanStatus.BLOCKED,
                     reason="Max review retries exceeded",
                 )
+                self._cascade_failure(plan_name)
             else:
                 issues = verdict.get("issues", [])
                 log.info("Review found %d issues for %s, spawning fix agent", len(issues), plan_name)
@@ -455,17 +459,20 @@ class ForemanLoop:
                 except Exception:
                     log.error("Failed to spawn fix agent for %s", plan_name, exc_info=True)
                     self.db.set_plan_status(plan_name, PlanStatus.FAILED)
+                    self._cascade_failure(plan_name)
 
         elif decision == ReviewVerdict.ARCHITECTURAL:
             reason = verdict.get("reason", "Architectural problem")
             log.warning("Architectural issue in %s: %s", plan_name, reason)
             self.db.set_plan_status(plan_name, PlanStatus.BLOCKED, reason=reason)
+            self._cascade_failure(plan_name)
 
         else:
             self.db.set_plan_status(
                 plan_name, PlanStatus.BLOCKED,
                 reason=f"Unknown review verdict: {decision}",
             )
+            self._cascade_failure(plan_name)
 
     def _read_review_verdict(self, worktree_path: str) -> dict | None:
         verdict_file = Path(worktree_path) / "REVIEW_VERDICT.json"
@@ -522,6 +529,23 @@ class ForemanLoop:
         self._pending_reviews.add(plan_name)
         self._schedule_event.set()
 
+    # --- Failure cascade ---
+
+    def _cascade_failure(self, failed_plan: str) -> None:
+        failed_status = self.db.get_plan_status(failed_plan)
+        queue = [failed_plan]
+        while queue:
+            current = queue.pop()
+            for plan in self._plans.values():
+                if current in plan.depends_on:
+                    status = self.db.get_plan_status(plan.name)
+                    if status == PlanStatus.QUEUED:
+                        self.db.set_plan_status(
+                            plan.name, PlanStatus.BLOCKED,
+                            reason=f"Dependency '{failed_plan}' is {failed_status}",
+                        )
+                        queue.append(plan.name)
+
     # --- Merge ---
 
     async def _merge_plan(self, plan_name: str) -> None:
@@ -549,6 +573,7 @@ class ForemanLoop:
                 plan_name, PlanStatus.BLOCKED,
                 reason=f"Merge conflict: {output[:200]}",
             )
+            self._cascade_failure(plan_name)
 
     async def _finalize_merge(self, plan_name: str) -> None:
         log.info("Merged %s successfully", plan_name)
@@ -702,6 +727,7 @@ class ForemanLoop:
         self.completion.cancel(plan_name)
         self._stuck_warned.discard(plan_name)
         self.db.set_plan_status(plan_name, PlanStatus.FAILED, reason=reason)
+        self._cascade_failure(plan_name)
 
     TIMEOUT_GRACE_PERIOD = 60
 
@@ -722,3 +748,4 @@ class ForemanLoop:
         self.stuck.cancel(plan_name)
         self.completion.cancel(plan_name)
         self.db.set_plan_status(plan_name, PlanStatus.FAILED, reason=reason)
+        self._cascade_failure(plan_name)
