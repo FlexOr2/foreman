@@ -21,12 +21,13 @@ class StuckDetector:
     def __init__(
         self,
         threshold_seconds: int,
-        on_stuck: Callable[[str], Coroutine],
+        on_stuck: Callable[[str, str | None], Coroutine],
     ) -> None:
         self.threshold = threshold_seconds
         self._on_stuck = on_stuck
         self._timers: dict[str, asyncio.TimerHandle] = {}
         self._active_plans: set[str] = set()
+        self._terminals: dict[str, str] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
@@ -34,8 +35,9 @@ class StuckDetector:
             self._loop = asyncio.get_running_loop()
         return self._loop
 
-    def track(self, plan_name: str) -> None:
+    def track(self, plan_name: str, terminal_name: str) -> None:
         self._active_plans.add(plan_name)
+        self._terminals[plan_name] = terminal_name
 
     def on_log_activity(self, plan_name: str) -> None:
         if plan_name not in self._active_plans:
@@ -53,10 +55,12 @@ class StuckDetector:
         if plan_name not in self._active_plans:
             return
         log.warning("Agent %s appears stuck (no log activity for %ds)", plan_name, self.threshold)
-        self._get_loop().create_task(self._on_stuck(plan_name))
+        terminal = self._terminals.get(plan_name)
+        self._get_loop().create_task(self._on_stuck(plan_name, terminal))
 
     def cancel(self, plan_name: str) -> None:
         self._active_plans.discard(plan_name)
+        self._terminals.pop(plan_name, None)
         timer = self._timers.pop(plan_name, None)
         if timer:
             timer.cancel()
@@ -66,6 +70,7 @@ class StuckDetector:
             timer.cancel()
         self._timers.clear()
         self._active_plans.clear()
+        self._terminals.clear()
 
 
 IDLE_PROMPT = "\u276f"

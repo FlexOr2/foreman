@@ -16,9 +16,9 @@ from foreman.brain import ForemanBrain
 from foreman.innovate import innovate
 from foreman.config import Config
 from foreman.preflight import check_prerequisites
-from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict
+from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict, StuckAction
 from foreman.dashboard import run_dashboard
-from foreman.monitor import CompletionDetector, StuckDetector, watch_done, watch_logs, watch_plans
+from foreman.monitor import CompletionDetector, StuckDetector, TOOL_RUNNING_MARKER, watch_done, watch_logs, watch_plans
 from foreman.plan_parser import InvalidPlanNameError, Plan, load_plans
 from foreman.resolver import (
     CircularDependencyError,
@@ -52,6 +52,7 @@ class ForemanLoop:
         self.completion = CompletionDetector(self.spawner)
         self._plans: dict[str, Plan] = {}
         self._pending_reviews: set[str] = set()
+        self._stuck_warned: set[str] = set()
         self._restart_pending = False
         self._schedule_event = asyncio.Event()
         self._shutdown = asyncio.Event()
@@ -151,7 +152,13 @@ class ForemanLoop:
         await watch_plans(self.config.plans_dir, on_plan_event)
 
     async def _log_watcher(self) -> None:
-        await watch_logs(self.config.log_dir, self.stuck.on_log_activity)
+        def on_activity(plan_name: str) -> None:
+            self.stuck.on_log_activity(plan_name)
+            if plan_name in self._stuck_warned:
+                self._stuck_warned.discard(plan_name)
+                self.db.set_blocked_reason(plan_name, None)
+
+        await watch_logs(self.config.log_dir, on_activity)
 
     async def _done_watcher(self) -> None:
         done_dir = self.config.repo_root / ".foreman" / "done"
@@ -281,8 +288,9 @@ class ForemanLoop:
                 log_file=str(self.config.log_dir / _log_filename(plan.name, AgentType.IMPLEMENTATION)),
             )
 
-        self.stuck.track(plan.name)
-        self.completion.track(plan.name, self.spawner.terminal_name(plan.name, AgentType.IMPLEMENTATION))
+        terminal = self.spawner.terminal_name(plan.name, AgentType.IMPLEMENTATION)
+        self.stuck.track(plan.name, terminal)
+        self.completion.track(plan.name, terminal)
 
     async def _on_implementation_done(self, plan_name: str) -> None:
         if self.config.agents.auto_review:
@@ -321,8 +329,9 @@ class ForemanLoop:
                 log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.REVIEW)),
             )
 
-        self.stuck.track(plan_name)
-        self.completion.track(plan_name, self.spawner.terminal_name(plan_name, AgentType.REVIEW))
+        terminal = self.spawner.terminal_name(plan_name, AgentType.REVIEW)
+        self.stuck.track(plan_name, terminal)
+        self.completion.track(plan_name, terminal)
         log.info("Spawned review agent for %s", plan_name)
 
     async def _on_review_done(self, plan_name: str) -> None:
@@ -411,8 +420,9 @@ class ForemanLoop:
                 log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.FIX)),
             )
 
-        self.stuck.track(plan_name)
-        self.completion.track(plan_name, self.spawner.terminal_name(plan_name, AgentType.FIX))
+        terminal = self.spawner.terminal_name(plan_name, AgentType.FIX)
+        self.stuck.track(plan_name, terminal)
+        self.completion.track(plan_name, terminal)
         log.info("Spawned fix agent for %s", plan_name)
 
     async def _on_fix_done(self, plan_name: str) -> None:
@@ -576,5 +586,30 @@ class ForemanLoop:
         except asyncio.TimeoutError:
             pass
 
-    async def _on_agent_stuck(self, plan_name: str) -> None:
+    async def _on_agent_stuck(self, plan_name: str, terminal: str | None) -> None:
+        reason = f"Agent appears stuck (no activity for {self.config.timeouts.stuck_threshold}s)"
+        self.db.set_blocked_reason(plan_name, reason)
+        self._stuck_warned.add(plan_name)
         log.warning("Agent %s is stuck — surfacing in dashboard", plan_name)
+
+        if self.config.agents.stuck_action != StuckAction.KILL or not terminal:
+            return
+
+        content = await self.spawner._capture_pane(terminal)
+        if content and TOOL_RUNNING_MARKER in content.lower():
+            log.info("Agent %s is mid-tool-execution, skipping kill — re-arming timer", plan_name)
+            self.stuck._get_loop().call_later(
+                self.config.timeouts.stuck_threshold,
+                self.stuck._fire_stuck,
+                plan_name,
+            )
+            return
+
+        log.warning("Killing stuck agent %s", plan_name)
+        agent_type = self.db.get_active_agent_type(plan_name)
+        if agent_type:
+            await self.spawner.kill_agent(plan_name, agent_type)
+        self.stuck.cancel(plan_name)
+        self.completion.cancel(plan_name)
+        self._stuck_warned.discard(plan_name)
+        self.db.set_plan_status(plan_name, PlanStatus.FAILED, reason=reason)
