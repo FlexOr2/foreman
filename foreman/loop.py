@@ -498,10 +498,8 @@ class ForemanLoop:
                         break
                     if self._count_drafts() >= self.config.analyzers.max_drafts:
                         break
-                    drafts = await run_analysis(focus, self.config, self.brain)
-                    if drafts:
-                        await self._scan_plans()
-                        self._schedule_event.set()
+                    completed = self.db.get_completed_plan_names()
+                    await run_analysis(focus, self.config, self.brain, completed)
 
             await self._wait_for_interval(self.config.analyzers.interval)
 

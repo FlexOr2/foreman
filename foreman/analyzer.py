@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -50,13 +51,20 @@ def _parse_draft_blocks(response: str) -> list[tuple[str, str]]:
     return blocks
 
 
-async def run_analysis(focus: AnalyzerFocus, config: Config, brain: ForemanBrain) -> list[Path]:
+async def run_analysis(
+    focus: AnalyzerFocus,
+    config: Config,
+    brain: ForemanBrain,
+    completed_plans: set[str] | None = None,
+) -> list[Path]:
     existing = _existing_plan_names(config.plans_dir)
-    existing_list = ", ".join(existing) if existing else "(none)"
+    completed = completed_plans or set()
+    skip_names = sorted(set(existing) | completed)
+    skip_list = ", ".join(skip_names) if skip_names else "(none)"
 
     prompt = (
         f"Focus area: {focus.prompt}\n\n"
-        f"Existing plans (do not duplicate): {existing_list}\n\n"
+        f"Existing and completed plans (do not duplicate): {skip_list}\n\n"
         "Read the codebase and generate 1-3 actionable plan files as markdown. "
         "Each plan should be a concrete, implementable task. "
         "Output each plan as a fenced code block with the filename as the first line "
@@ -82,7 +90,7 @@ async def run_analysis(focus: AnalyzerFocus, config: Config, brain: ForemanBrain
         if draft_path.exists():
             log.debug("Draft already exists: %s", draft_path.name)
             continue
-        draft_path.write_text(content + "\n")
+        await asyncio.to_thread(draft_path.write_text, content + "\n")
         existing.append(name)
         created.append(draft_path)
         log.info("Created draft plan: %s", draft_path.name)
