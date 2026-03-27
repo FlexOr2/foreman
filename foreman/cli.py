@@ -431,22 +431,43 @@ def resume(plan_name: str, repo: Path = Path(".")) -> None:
 
 
 @app.command
-def unblock(plan_name: str, repo: Path = Path(".")) -> None:
+def unblock(plan_name: str, repo: Path = Path("."), *, clean: bool = False) -> None:
     """Re-queue a BLOCKED or FAILED plan so the scheduler picks it up again."""
     _setup_logging()
     config = load_config(repo.resolve())
     db = CoordinationDB(config.coordination_db)
-    status = db.get_plan_status(plan_name)
-    if status not in (PlanStatus.BLOCKED, PlanStatus.FAILED):
-        console.print(f"[yellow]Plan {plan_name} is not blocked or failed[/yellow] (status: {status})")
+    try:
+        status = db.get_plan_status(plan_name)
+        if status not in (PlanStatus.BLOCKED, PlanStatus.FAILED):
+            console.print(f"[yellow]Plan {plan_name} is not blocked or failed[/yellow] (status: {status})")
+            return
+        previous_reason = db.get_plan(plan_name).get("blocked_reason", "")
+
+        if clean:
+            from foreman.worktree import branch_has_commits, remove_worktree
+
+            branch = f"{config.branch_prefix}{plan_name}"
+
+            async def _clean() -> None:
+                commit_count = await branch_has_commits(branch, config.repo_root)
+                if commit_count:
+                    console.print(
+                        f"[yellow]Warning:[/yellow] branch {branch} has {commit_count} "
+                        f"commit(s) that will be discarded."
+                    )
+                await remove_worktree(plan_name, config)
+
+            asyncio.run(_clean())
+            console.print(f"Cleaned worktree and branch for [bold]{plan_name}[/bold]")
+
+        db.set_plan_status(plan_name, PlanStatus.QUEUED)
+        log.info("Unblocked plan %s (was %s: %s)", plan_name, status, previous_reason or "no reason recorded")
+        console.print(f"Re-queued [bold]{plan_name}[/bold] (was {status}: {previous_reason or 'no reason'})")
+        if not clean:
+            console.print("Existing worktree preserved. Use --clean to start fresh.")
+        console.print("Will be picked up on next scheduler cycle.")
+    finally:
         db.close()
-        return
-    previous_reason = db.get_plan(plan_name).get("blocked_reason", "")
-    db.set_plan_status(plan_name, PlanStatus.QUEUED)
-    db.close()
-    log.info("Unblocked plan %s (was %s: %s)", plan_name, status, previous_reason or "no reason recorded")
-    console.print(f"Re-queued [bold]{plan_name}[/bold] (was {status}: {previous_reason or 'no reason'})")
-    console.print("Will be picked up on next scheduler cycle.")
 
 
 @app.command

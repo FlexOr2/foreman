@@ -77,13 +77,13 @@ async def remove_worktree(plan_name: str, config: Config) -> None:
         log.info("Deleted branch %s", branch)
 
 
-async def branch_has_commits(branch: str, repo_root: Path) -> bool:
+async def branch_has_commits(branch: str, repo_root: Path) -> int:
     rc, stdout, _ = await _run_git(
         "rev-list", "--count", f"main..{branch}", cwd=repo_root,
     )
     if rc != 0:
-        return False
-    return int(stdout.strip()) > 0
+        return 0
+    return int(stdout.strip())
 
 
 async def merge_branch(branch: str, repo_root: Path) -> tuple[bool, str]:
