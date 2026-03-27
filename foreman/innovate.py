@@ -469,7 +469,7 @@ async def innovate(
     foreman_dir.mkdir(parents=True, exist_ok=True)
 
     brain = ForemanBrain(
-        foreman_dir=foreman_dir,
+        foreman_dir=foreman_dir / "innovator",
         allowed_tools=tools,
         permission_mode=config.agents.permission_mode,
     )
@@ -522,7 +522,7 @@ async def review_existing_drafts(
     foreman_dir.mkdir(parents=True, exist_ok=True)
 
     brain = ForemanBrain(
-        foreman_dir=foreman_dir,
+        foreman_dir=foreman_dir / "innovator",
         allowed_tools=BRAIN_TOOLS,
         permission_mode=config.agents.permission_mode,
     )
