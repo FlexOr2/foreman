@@ -19,6 +19,7 @@ FOREMAN_DIR = ".foreman"
 
 @dataclass
 class TimeoutConfig:
+    # Hard timeout per agent type in seconds. 0 = no hard timeout.
     implementation: int = 1800
     review: int = 600
     stuck_threshold: int = 300

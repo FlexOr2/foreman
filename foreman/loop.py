@@ -47,6 +47,7 @@ class ForemanLoop:
         self.stuck = StuckDetector(
             config.timeouts.stuck_threshold,
             on_stuck=self._on_agent_stuck,
+            on_timeout=self._on_agent_timeout,
         )
         self.completion = CompletionDetector(self.spawner)
         self._plans: dict[str, Plan] = {}
@@ -343,6 +344,9 @@ class ForemanLoop:
         terminal = self.spawner.terminal_name(plan.name, AgentType.IMPLEMENTATION)
         self.stuck.track(plan.name, terminal)
         self.completion.track(plan.name, terminal)
+        timeout = self.config.get_timeout(plan.name, AgentType.IMPLEMENTATION)
+        if timeout > 0:
+            self.stuck.track_timeout(plan.name, terminal, timeout)
 
     async def _on_implementation_done(self, plan_name: str) -> None:
         if self.config.agents.auto_review:
@@ -385,6 +389,9 @@ class ForemanLoop:
         terminal = self.spawner.terminal_name(plan_name, AgentType.REVIEW)
         self.stuck.track(plan_name, terminal)
         self.completion.track(plan_name, terminal)
+        timeout = self.config.get_timeout(plan_name, AgentType.REVIEW)
+        if timeout > 0:
+            self.stuck.track_timeout(plan_name, terminal, timeout)
         log.info("Spawned review agent for %s", plan_name)
 
     async def _on_review_done(self, plan_name: str) -> None:
@@ -481,6 +488,9 @@ class ForemanLoop:
         terminal = self.spawner.terminal_name(plan_name, AgentType.FIX)
         self.stuck.track(plan_name, terminal)
         self.completion.track(plan_name, terminal)
+        timeout = self.config.get_timeout(plan_name, AgentType.FIX)
+        if timeout > 0:
+            self.stuck.track_timeout(plan_name, terminal, timeout)
         log.info("Spawned fix agent for %s", plan_name)
 
     async def _on_fix_done(self, plan_name: str) -> None:
@@ -669,4 +679,24 @@ class ForemanLoop:
         self.stuck.cancel(plan_name)
         self.completion.cancel(plan_name)
         self._stuck_warned.discard(plan_name)
+        self.db.set_plan_status(plan_name, PlanStatus.FAILED, reason=reason)
+
+    TIMEOUT_GRACE_PERIOD = 60
+
+    async def _on_agent_timeout(self, plan_name: str, terminal: str | None) -> None:
+        agent_type = self.db.get_active_agent_type(plan_name)
+        reason = "Agent exceeded hard timeout"
+        log.warning("Hard timeout fired for %s", plan_name)
+
+        if terminal:
+            content = await self.spawner.capture_output(terminal)
+            if content and TOOL_RUNNING_MARKER in content.lower():
+                log.info("Agent %s is mid-tool-execution, granting %ds grace period", plan_name, self.TIMEOUT_GRACE_PERIOD)
+                self.stuck.track_timeout(plan_name, terminal, self.TIMEOUT_GRACE_PERIOD)
+                return
+
+        if agent_type:
+            await self.spawner.kill_agent(plan_name, agent_type)
+        self.stuck.cancel(plan_name)
+        self.completion.cancel(plan_name)
         self.db.set_plan_status(plan_name, PlanStatus.FAILED, reason=reason)
