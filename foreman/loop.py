@@ -308,19 +308,25 @@ class ForemanLoop:
             log.warning("Orphaned plan %s — agent window gone, processing completion", plan_name)
             self.stuck.cancel(plan_name)
             self.completion.cancel(plan_name)
-            self._active_agent_ids.pop(plan_name, None)
 
             sentinel_name = f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}"
             sentinel_file = self.config.repo_root / ".foreman" / "done" / sentinel_name
+
+            agent_id = self._active_agent_ids.pop(plan_name, None)
+
             if sentinel_file.exists():
                 exit_code = self._read_exit_code(sentinel_name)
                 sentinel_file.unlink(missing_ok=True)
+                if agent_id is not None:
+                    self.db.finish_agent(agent_id, exit_code)
                 if exit_code == 0:
                     await self._dispatch_agent_done(plan_name, agent_type)
                 else:
                     self.db.set_plan_status(plan_name, PlanStatus.FAILED)
                     self._cascade_failure(plan_name)
             else:
+                if agent_id is not None:
+                    self.db.finish_agent(agent_id, exit_code=-1)
                 worktree_path = plan_data.get("worktree_path")
                 if worktree_path:
                     await self._dispatch_agent_done(plan_name, agent_type)
