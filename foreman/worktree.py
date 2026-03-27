@@ -103,8 +103,8 @@ async def get_merge_diff(repo_root: Path) -> str:
     return stdout
 
 
-async def complete_merge(repo_root: Path, message: str) -> tuple[bool, str]:
-    rc_add, _, stderr_add = await _run_git("add", "-A", cwd=repo_root)
+async def complete_merge(repo_root: Path, message: str, files: list[str]) -> tuple[bool, str]:
+    rc_add, _, stderr_add = await _run_git("add", "--", *files, cwd=repo_root)
     if rc_add != 0:
         return False, stderr_add
     rc, stdout, stderr = await _run_git("commit", "--no-edit", "-m", message, cwd=repo_root)
