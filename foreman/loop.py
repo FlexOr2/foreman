@@ -186,9 +186,9 @@ class ForemanLoop:
 
             elif mask & Mask.MODIFY:
                 status = self.db.get_plan_status(name)
-                if status == PlanStatus.RUNNING:
+                if status in (PlanStatus.RUNNING, PlanStatus.REVIEWING):
                     agent_type = self.db.get_active_agent_type(name) or AgentType.IMPLEMENTATION
-                    log.info("Plan %s modified while running, notifying %s agent", name, agent_type.value)
+                    log.info("Plan %s modified while %s, notifying %s agent", name, status.value.lower(), agent_type.value)
                     await self.spawner.notify_agent(
                         name, agent_type,
                         f"The plan has been updated. Re-read {file_path} and adapt your approach.",
