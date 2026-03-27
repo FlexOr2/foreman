@@ -522,25 +522,27 @@ Built with **cyclopts**.
 
 ## Implementation Plan
 
-### Phase 1: Core (MVP)
-- [ ] `plan_parser.py` — parse markdown plans, ignore `draft-*` files
-- [ ] `resolver.py` — build DAG, determine ready plans
-- [ ] `coordination.py` — SQLite status tracking + PID management
-- [ ] `worktree.py` — create/remove git worktrees
-- [ ] `spawner.py` — launcher script generation + tmux backend (`exec`, `pipe-pane`, `--add-dir`)
-- [ ] `monitor.py` — asyncinotify on log files + per-agent stuck timers
-- [ ] `brain.py` — persistent Claude CLI session via `--resume`, asyncio.Lock, error recovery
-- [ ] `loop.py` — async event loop tying everything together
-- [ ] `cli.py` — `foreman start` and `foreman plan` commands (cyclopts)
-- [ ] `config.py` — `foreman.toml` loading
-- [ ] Agent prompt files (implementation, review, fix)
-- [ ] Graceful shutdown + startup recovery
+### Phase 1: Core (MVP) ✓
+- [x] `plan_parser.py` — parse markdown plans, ignore `draft-*` files
+- [x] `resolver.py` — build DAG, determine ready plans
+- [x] `coordination.py` — SQLite status tracking + PID management
+- [x] `worktree.py` — create/remove git worktrees
+- [x] `spawner.py` — launcher script generation + tmux backend (`pipe-pane`, `--add-dir`)
+- [x] `monitor.py` — asyncinotify on log files + per-agent stuck timers
+- [x] `brain.py` — persistent Claude CLI session via `--resume`, asyncio.Lock, error recovery
+- [x] `loop.py` — async event loop tying everything together
+- [x] `cli.py` — `foreman start`, `foreman plan`, `foreman status`, `foreman kill`, `foreman reset`
+- [x] `config.py` — `foreman.toml` loading
+- [x] Agent prompt files (implementation, review, fix)
+- [x] Graceful shutdown (startup recovery not yet implemented)
 
-### Phase 2: Self-Review Loop
-- [ ] Review agent (interactive, own tmux window, writes REVIEW_VERDICT.json)
-- [ ] Fix agent re-spawn on findings
-- [ ] BLOCKED escalation on architectural problems
-- [ ] Max retry count (default 2)
+### Phase 2: Self-Review Loop ✓
+- [x] Review agent (own tmux window, writes REVIEW_VERDICT.json)
+- [x] Fix agent re-spawn on findings
+- [x] BLOCKED escalation on architectural problems
+- [x] Max retry count (default 2)
+- [x] Review slot management (`max_parallel_reviews` enforced separately from workers)
+- [x] ReviewVerdict enum for verdict parsing
 
 ### Phase 3: Intelligent Merge
 - [ ] Brain reads diffs + plans for conflict resolution
