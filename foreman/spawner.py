@@ -277,5 +277,22 @@ class Spawner:
     async def notify_agent(self, plan_name: str, agent_type: AgentType, message: str) -> None:
         await self.backend.send_text(self.terminal_name(plan_name, agent_type), message)
 
+    async def has_window(self, terminal: str) -> bool:
+        proc = await asyncio.create_subprocess_exec(
+            "tmux", "has-window", "-t", f"{TMUX_SESSION}:{terminal}",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        return proc.returncode == 0
+
+    async def kill_session(self) -> None:
+        proc = await asyncio.create_subprocess_exec(
+            "tmux", "kill-session", "-t", TMUX_SESSION,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+
     async def kill_agent(self, plan_name: str, agent_type: AgentType) -> None:
         await self.backend.kill_terminal(self.terminal_name(plan_name, agent_type))

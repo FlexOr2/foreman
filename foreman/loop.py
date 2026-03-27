@@ -28,8 +28,9 @@ from foreman.resolver import (
 )
 from foreman.spawner import AGENT_TYPE_SEP, Spawner, _log_filename
 from foreman.worktree import (
-    abort_merge, complete_merge, create_worktree, get_conflict_files,
-    get_merge_diff, merge_branch, merge_touched_self, remove_worktree,
+    abort_merge, branch_has_commits, complete_merge, create_worktree,
+    get_conflict_files, get_merge_diff, merge_branch, merge_touched_self,
+    remove_worktree,
 )
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class ForemanLoop:
             loop.add_signal_handler(sig, self._request_shutdown)
 
         await self._scan_plans()
+        await self._recover_running_plans()
 
         try:
             async with asyncio.TaskGroup() as tg:
@@ -127,6 +129,38 @@ class ForemanLoop:
             if plan.name not in known_plans:
                 self.db.upsert_plan(plan.name, PlanStatus.QUEUED)
                 log.info("New plan detected: %s", plan.name)
+
+    async def _recover_running_plans(self) -> None:
+        interrupted = (
+            self.db.get_plans_by_status(PlanStatus.RUNNING)
+            + self.db.get_plans_by_status(PlanStatus.REVIEWING)
+            + self.db.get_plans_by_status(PlanStatus.INTERRUPTED)
+        )
+        if not interrupted:
+            return
+
+        log.info("Recovering %d interrupted plans", len(interrupted))
+
+        for plan_data in interrupted:
+            plan_name = plan_data["plan"]
+            branch = plan_data["branch"]
+            agent_type = self.db.get_active_agent_type(plan_name)
+
+            if agent_type:
+                terminal = self.spawner.terminal_name(plan_name, agent_type)
+                if await self.spawner.has_window(terminal):
+                    log.info("Plan %s still has live agent in %s, re-registering", plan_name, terminal)
+                    self.stuck.track(plan_name, terminal)
+                    self.completion.track(plan_name, terminal)
+                    continue
+
+            if branch and await branch_has_commits(branch, self.config.repo_root):
+                log.info("Plan %s has commits on %s, treating as implementation done", plan_name, branch)
+                self.db.set_plan_status(plan_name, PlanStatus.RUNNING)
+                await self._on_implementation_done(plan_name)
+            else:
+                log.info("Plan %s has no commits, re-queuing for spawn", plan_name)
+                self.db.set_plan_status(plan_name, PlanStatus.QUEUED)
 
     async def _plan_watcher(self) -> None:
         async def on_plan_event(file_path: Path, mask: Mask) -> None:
@@ -505,7 +539,9 @@ class ForemanLoop:
             self.brain.save()
 
         self.db.close()
-        await self.spawner.teardown()
+
+        await self.spawner.kill_session()
+        log.info("Killed tmux session before restart")
 
         log.info("Restarting foreman to apply self-improvements")
         args = [sys.executable, "-m", "foreman.cli", "start",
