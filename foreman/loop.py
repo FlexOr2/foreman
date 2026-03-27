@@ -665,11 +665,7 @@ class ForemanLoop:
         content = await self.spawner.capture_output(terminal)
         if content and TOOL_RUNNING_MARKER in content.lower():
             log.info("Agent %s is mid-tool-execution, skipping kill — re-arming timer", plan_name)
-            self.stuck._get_loop().call_later(
-                self.config.timeouts.stuck_threshold,
-                self.stuck._fire_stuck,
-                plan_name,
-            )
+            self.stuck.on_log_activity(plan_name)
             return
 
         log.warning("Killing stuck agent %s", plan_name)
