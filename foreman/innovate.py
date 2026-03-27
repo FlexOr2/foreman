@@ -453,6 +453,7 @@ async def innovate(
     scope_path: str | None = None,
     skip_review: bool = False,
     on_review: _ReviewCallback | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[Path]:
     effective_categories = categories or config.innovate.categories
     effective_max = max_ideas or config.innovate.max_ideas
@@ -472,6 +473,10 @@ async def innovate(
 
     result = await brain.think(prompt)
 
+    if should_stop and should_stop():
+        log.info("Innovator pausing for restart after exploration")
+        return []
+
     if "NO_FINDINGS" in result:
         log.info("Exploration complete — no findings")
         return []
@@ -489,6 +494,10 @@ async def innovate(
 
     survivors: list[tuple[str, str]] = []
     for slug, plan_text in plans:
+        if should_stop and should_stop():
+            log.info("Innovator pausing for restart before reviewing %s", slug)
+            break
+
         log.info("Reviewing plan: %s", slug)
         survived, final_text = await adversarial_review(
             plan_text, config.agents.permission_mode, brain, on_review,
