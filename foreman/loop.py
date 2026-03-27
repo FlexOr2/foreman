@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import signal
+import sys
 from pathlib import Path
 
 from asyncinotify import Mask
@@ -21,7 +23,7 @@ from foreman.resolver import CircularDependencyError, get_ready_plans, validate_
 from foreman.spawner import AGENT_TYPE_SEP, Spawner, _log_filename
 from foreman.worktree import (
     abort_merge, complete_merge, create_worktree, get_conflict_files,
-    get_merge_diff, merge_branch, remove_worktree,
+    get_merge_diff, merge_branch, merge_touched_self, remove_worktree,
 )
 
 log = logging.getLogger(__name__)
@@ -43,6 +45,7 @@ class ForemanLoop:
         )
         self._plans: dict[str, Plan] = {}
         self._pending_reviews: set[str] = set()
+        self._restart_pending = False
         self._schedule_event = asyncio.Event()
         self._shutdown = asyncio.Event()
 
@@ -201,6 +204,10 @@ class ForemanLoop:
                 task.cancel()
 
     async def _try_spawn_ready(self) -> None:
+        if self._restart_pending:
+            await self._try_restart()
+            return
+
         completed = self.db.get_completed_plan_names()
         running = self.db.get_running_plan_names()
 
@@ -426,6 +433,34 @@ class ForemanLoop:
         self.db.set_plan_status(plan_name, PlanStatus.DONE)
         await remove_worktree(plan_name, self.config)
 
+        if self.config.auto_restart and await merge_touched_self(self.config.repo_root):
+            log.info("Merge of %s modified foreman/ — restart pending", plan_name)
+            self._restart_pending = True
+
+    async def _try_restart(self) -> None:
+        running = self.db.get_running_plan_names()
+        if running:
+            log.info("Restart pending — waiting for %d active agents to finish", len(running))
+            return
+
+        if self._pending_reviews:
+            log.info("Restart pending — waiting for %d pending reviews", len(self._pending_reviews))
+            return
+
+        log.info("All agents finished — preparing to restart")
+
+        try:
+            await self.brain.summarize_and_reset()
+        except Exception:
+            log.warning("Brain summarization failed before restart", exc_info=True)
+            self.brain.save()
+
+        self.db.close()
+        await self.spawner.teardown()
+
+        log.info("Restarting foreman to apply self-improvements")
+        os.execv(sys.executable, [sys.executable, "-m", "foreman.cli", "start"])
+
     async def _brain_resolve_conflict(self, plan_name: str, branch: str) -> bool:
         conflict_files = await get_conflict_files(self.config.repo_root)
         if not conflict_files:
@@ -492,6 +527,9 @@ class ForemanLoop:
             return
 
         while not self._shutdown.is_set():
+            if self._restart_pending:
+                return
+
             if self._count_drafts() < self.config.innovate.max_drafts:
                 await innovate(
                     self.config,
