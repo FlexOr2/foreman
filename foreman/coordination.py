@@ -32,6 +32,11 @@ class ReviewVerdict(StrEnum):
     ARCHITECTURAL = "architectural"
 
 
+class StuckAction(StrEnum):
+    WARN = "warn"
+    KILL = "kill"
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS plans (
     plan TEXT PRIMARY KEY,
@@ -118,6 +123,13 @@ class CoordinationDB:
             self._conn.execute(
                 "UPDATE plans SET status=?, blocked_reason=?, updated_at=? WHERE plan=?",
                 (status, reason, _now(), plan),
+            )
+
+    def set_blocked_reason(self, plan: str, reason: str | None) -> None:
+        with self.tx():
+            self._conn.execute(
+                "UPDATE plans SET blocked_reason=?, updated_at=? WHERE plan=?",
+                (reason, _now(), plan),
             )
 
     def get_plan_status(self, plan: str) -> PlanStatus | None:

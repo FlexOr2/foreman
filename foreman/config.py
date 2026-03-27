@@ -6,7 +6,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from foreman.coordination import AgentType
+from foreman.coordination import AgentType, StuckAction
 
 CLAUDE_BIN = "claude"
 
@@ -31,6 +31,7 @@ class AgentConfig:
     auto_review: bool = True
     max_review_retries: int = 2
     permission_mode: str = "dontAsk"
+    stuck_action: StuckAction = StuckAction.WARN
 
 
 ALL_IDEA_CATEGORIES = [
