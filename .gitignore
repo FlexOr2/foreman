@@ -1,0 +1,17 @@
+# Foreman runtime data
+.foreman/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
