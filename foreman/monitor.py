@@ -41,6 +41,10 @@ class StuckDetector:
     def track(self, plan_name: str, terminal_name: str) -> None:
         self._active_plans.add(plan_name)
         self._terminals[plan_name] = terminal_name
+        loop = self._get_loop()
+        self._timers[plan_name] = loop.call_later(
+            self.threshold, self._fire_stuck, plan_name,
+        )
 
     def on_log_activity(self, plan_name: str) -> None:
         if plan_name not in self._active_plans:
