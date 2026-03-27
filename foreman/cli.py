@@ -377,6 +377,82 @@ def analyze(
 
 
 @app.command
+def innovate(
+    repo: Path = Path("."),
+    web: bool = False,
+    path: str | None = None,
+    max_ideas: int | None = None,
+    skip_review: bool = False,
+    review_only: bool = False,
+    categories: str | None = None,
+) -> None:
+    """Autonomously discover improvements via adversarial review pipeline."""
+    from foreman.innovate import innovate as run_innovate, review_existing_drafts, Verdict
+
+    _setup_logging()
+    config = load_config(repo.resolve())
+
+    cat_list = [c.strip() for c in categories.split(",")] if categories else None
+
+    def _on_review(reviewer_name: str, verdict) -> None:
+        style = {"KILL": "red", "REVISE": "yellow", "PASS": "green"}[verdict.action.value]
+        console.print(f"  [{style}]{reviewer_name}: {verdict.action.value}[/{style}] — {verdict.reason}")
+
+    if review_only:
+        console.print("[bold]Reviewing[/bold] existing draft plans")
+        survivors, killed = asyncio.run(review_existing_drafts(config, on_review=_on_review))
+
+        for name, reason in killed:
+            console.print(f"  [red]KILLED[/red] {name}: {reason}")
+
+        if survivors:
+            console.print(f"\n[bold]{len(survivors)}[/bold] drafts survived review.")
+        else:
+            console.print("\n[yellow]No drafts survived review.[/yellow]")
+        return
+
+    console.print("[bold]Foreman Innovate[/bold] — autonomous improvement discovery")
+    if cat_list:
+        console.print(f"  Categories: {', '.join(cat_list)}")
+    if path:
+        console.print(f"  Scope: {path}")
+    if web:
+        console.print("  Web search: enabled")
+    if skip_review:
+        console.print("  Adversarial review: [yellow]skipped[/yellow]")
+    console.print()
+
+    drafts = asyncio.run(run_innovate(
+        config,
+        categories=cat_list,
+        max_ideas=max_ideas,
+        web=web,
+        scope_path=path,
+        skip_review=skip_review,
+        on_review=_on_review,
+    ))
+
+    if not drafts:
+        console.print("\n[yellow]No actionable ideas survived.[/yellow]")
+        return
+
+    table = Table(title="Generated Draft Plans")
+    table.add_column("File", style="cyan")
+    table.add_column("Status", style="green")
+
+    for draft in drafts:
+        status_label = "ready for review" if skip_review else "survived adversarial review"
+        table.add_row(str(draft.relative_to(config.repo_root)), status_label)
+
+    console.print()
+    console.print(table)
+    console.print(
+        f"\n[bold]{len(drafts)}[/bold] draft plans written. "
+        f"Review and rename (remove 'draft-' prefix) to approve."
+    )
+
+
+@app.command
 def reset(repo: Path = Path(".")) -> None:
     """Reset coordination DB and clean up worktrees."""
     _setup_logging()

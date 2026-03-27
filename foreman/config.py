@@ -63,6 +63,18 @@ class AnalyzeConfig:
     exclude_patterns: list[str] = field(default_factory=lambda: [".venv", "node_modules", "dist", "__pycache__", ".git"])
 
 
+ALL_IDEA_CATEGORIES = [
+    "risk", "performance", "architecture", "debt", "dx",
+    "features", "competitive", "delight", "moonshots",
+]
+
+
+@dataclass
+class InnovateConfig:
+    max_ideas: int = 10
+    categories: list[str] = field(default_factory=lambda: list(ALL_IDEA_CATEGORIES))
+
+
 @dataclass
 class Config:
     plans_dir: Path = field(default_factory=lambda: Path("plans"))
@@ -83,6 +95,7 @@ class Config:
     agents: AgentConfig = field(default_factory=AgentConfig)
     analyze: AnalyzeConfig = field(default_factory=AnalyzeConfig)
     analyzers: AnalyzerConfig = field(default_factory=AnalyzerConfig)
+    innovate: InnovateConfig = field(default_factory=InnovateConfig)
 
     allowed_tools: dict[str, str] = field(default_factory=lambda: {
         AgentType.REVIEW: "Read,Glob,Grep,Bash,Write",
@@ -153,6 +166,11 @@ def load_config(repo_root: Path | None = None) -> Config:
             for key, value in foreman["analyze"].items():
                 if hasattr(config.analyze, key):
                     setattr(config.analyze, key, value)
+
+        if "innovate" in foreman:
+            for key, value in foreman["innovate"].items():
+                if hasattr(config.innovate, key):
+                    setattr(config.innovate, key, value)
 
         if "allowed_tools" in foreman:
             config.allowed_tools.update(foreman["allowed_tools"])
