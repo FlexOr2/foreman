@@ -56,6 +56,7 @@ class Config:
     prompts_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/prompts"))
     coordination_db: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/coordination.db"))
     log_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/logs"))
+    log_file: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/foreman.log"))
     worktree_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/worktrees"))
     scripts_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/scripts"))
     branch_prefix: str = "feat/"
@@ -85,6 +86,7 @@ class Config:
         self.prompts_dir = self.repo_root / self.prompts_dir
         self.coordination_db = self.repo_root / self.coordination_db
         self.log_dir = self.repo_root / self.log_dir
+        self.log_file = self.repo_root / self.log_file
         self.worktree_dir = self.repo_root / self.worktree_dir
         self.scripts_dir = self.repo_root / self.scripts_dir
 
@@ -117,7 +119,7 @@ def load_config(repo_root: Path | None = None) -> Config:
         foreman = raw.get("foreman", {})
 
         for key in ("plans_dir", "prompts_dir", "coordination_db", "log_dir",
-                     "worktree_dir", "scripts_dir", "branch_prefix", "auto_restart"):
+                     "log_file", "worktree_dir", "scripts_dir", "branch_prefix", "auto_restart"):
             if key in foreman:
                 value = foreman[key]
                 if key not in ("branch_prefix", "auto_restart"):
