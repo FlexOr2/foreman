@@ -52,6 +52,7 @@ class ForemanLoop:
         self._plans: dict[str, Plan] = {}
         self._pending_reviews: set[str] = set()
         self._stuck_warned: set[str] = set()
+        self._active_agent_ids: dict[str, int] = {}
         self._restart_pending = False
         self._innovator_running = False
         self._schedule_event = asyncio.Event()
@@ -216,6 +217,10 @@ class ForemanLoop:
                 plan_name, agent_type.value, exit_code,
             )
 
+            agent_id = self._active_agent_ids.pop(plan_name, None)
+            if agent_id is not None:
+                self.db.finish_agent(agent_id, exit_code)
+
             self.stuck.cancel(plan_name)
             self.completion.cancel(plan_name)
 
@@ -322,11 +327,12 @@ class ForemanLoop:
                     branch=branch,
                     worktree_path=str(worktree_path),
                 )
-                self.db.add_agent(
+                agent_id = self.db.add_agent(
                     plan.name, AgentType.IMPLEMENTATION,
                     pid=pid,
                     log_file=str(self.config.log_dir / _log_filename(plan.name, AgentType.IMPLEMENTATION)),
                 )
+                self._active_agent_ids[plan.name] = agent_id
         except BaseException:
             try:
                 await remove_worktree(plan.name, self.config)
@@ -369,11 +375,12 @@ class ForemanLoop:
 
         with self.db.tx():
             self.db.set_plan_status(plan_name, PlanStatus.REVIEWING)
-            self.db.add_agent(
+            agent_id = self.db.add_agent(
                 plan_name, AgentType.REVIEW,
                 pid=pid,
                 log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.REVIEW)),
             )
+            self._active_agent_ids[plan_name] = agent_id
 
         terminal = self.spawner.terminal_name(plan_name, AgentType.REVIEW)
         self.stuck.track(plan_name, terminal)
@@ -464,11 +471,12 @@ class ForemanLoop:
 
         with self.db.tx():
             self.db.set_plan_status(plan_name, PlanStatus.RUNNING)
-            self.db.add_agent(
+            agent_id = self.db.add_agent(
                 plan_name, AgentType.FIX,
                 pid=pid,
                 log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.FIX)),
             )
+            self._active_agent_ids[plan_name] = agent_id
 
         terminal = self.spawner.terminal_name(plan_name, AgentType.FIX)
         self.stuck.track(plan_name, terminal)

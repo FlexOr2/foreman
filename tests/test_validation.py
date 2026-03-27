@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from foreman.coordination import AgentType, CoordinationDB
 from foreman.plan_parser import InvalidPlanNameError, Plan, parse_plan
 from foreman.resolver import (
     CircularDependencyError,
@@ -102,6 +103,20 @@ class TestUnresolvedDependencies:
 
 
 # --- Module encapsulation ---
+
+
+class TestAgentLifecycle:
+    def test_finish_agent_closes_record(self, tmp_path: Path) -> None:
+        db = CoordinationDB(tmp_path / "foreman.db")
+        db.upsert_plan("test-plan", "queued")
+
+        agent_id = db.add_agent("test-plan", AgentType.IMPLEMENTATION, pid=1234)
+        assert db.get_active_agent_type("test-plan") == AgentType.IMPLEMENTATION
+
+        db.finish_agent(agent_id, exit_code=0)
+        assert db.get_active_agent_type("test-plan") is None
+
+        db.close()
 
 
 MONITOR_PATH = Path(__file__).resolve().parent.parent / "foreman" / "monitor.py"
