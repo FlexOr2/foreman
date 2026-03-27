@@ -42,6 +42,7 @@ class ForemanLoop:
             config.coordination_db.parent,
             allowed_tools=config.allowed_tools.get("brain", "Read,Edit,Bash,Glob,Grep"),
             permission_mode=config.agents.permission_mode,
+            timeout=config.timeouts.brain_timeout,
         )
         self.spawner = Spawner(config)
         self.stuck = StuckDetector(
