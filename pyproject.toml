@@ -19,6 +19,9 @@ foreman = "foreman.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["foreman"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"foreman/templates" = "foreman/templates"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

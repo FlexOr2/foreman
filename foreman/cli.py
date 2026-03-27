@@ -15,6 +15,7 @@ from foreman.config import load_config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.loop import ForemanLoop
 from foreman.plan_parser import load_plans
+from foreman.preflight import check_git_repo, check_prerequisites
 from foreman.resolver import CircularDependencyError, compute_waves
 from foreman.spawner import Spawner
 
@@ -46,13 +47,87 @@ STATUS_STYLES = {
 
 
 @app.command
+def init(repo: Path = Path(".")) -> None:
+    """Initialize a repo for Foreman — creates plans/, copies prompt templates, validates prerequisites."""
+    import shutil
+    from importlib.resources import files
+
+    repo = repo.resolve()
+
+    if not check_git_repo(str(repo)):
+        console.print(f"[red]{repo} is not a git repository.[/red] Run 'git init' first.")
+        sys.exit(1)
+
+    if not check_prerequisites(console):
+        sys.exit(1)
+
+    plans_dir = repo / "plans"
+    plans_dir.mkdir(exist_ok=True)
+
+    templates = files("foreman") / "templates"
+    copied = 0
+    for template in templates.iterdir():
+        if template.name.startswith("prompt-") and template.name.endswith(".md"):
+            dest = plans_dir / template.name
+            if not dest.exists():
+                dest.write_text(template.read_text())
+                console.print(f"  Created {dest.relative_to(repo)}")
+                copied += 1
+
+    config_path = repo / "foreman.toml"
+    if not config_path.exists():
+        config_path.write_text(_DEFAULT_CONFIG)
+        console.print(f"  Created foreman.toml")
+
+    gitignore = repo / ".gitignore"
+    gitignore_entry = ".foreman/"
+    if gitignore.exists():
+        content = gitignore.read_text()
+        if gitignore_entry not in content:
+            with open(gitignore, "a") as f:
+                f.write(f"\n# Foreman runtime data\n{gitignore_entry}\n")
+            console.print("  Added .foreman/ to .gitignore")
+    else:
+        gitignore.write_text(f"# Foreman runtime data\n{gitignore_entry}\n")
+        console.print("  Created .gitignore")
+
+    console.print(f"\n[green]Foreman initialized.[/green] Add plan files to {plans_dir.relative_to(repo)}/ and run 'foreman start'.")
+
+
+_DEFAULT_CONFIG = """\
+[foreman]
+# plans_dir = "plans"
+# branch_prefix = "feat/"
+
+[foreman.agents]
+# max_parallel_workers = 3
+# max_parallel_reviews = 2
+# model = "opus"
+# permission_mode = "dontAsk"
+
+[foreman.timeouts]
+# implementation = 1800
+# review = 600
+# stuck_threshold = 300
+"""
+
+
+@app.command
 def start(
     repo: Path = Path("."),
     debug: bool = False,
 ) -> None:
     """Start Foreman — enters the event loop, watches for plans, spawns agents."""
     _setup_logging(debug)
+
+    if not check_prerequisites(console):
+        sys.exit(1)
+
     config = load_config(repo.resolve())
+
+    if not config.plans_dir.exists():
+        console.print(f"[yellow]No plans directory found.[/yellow] Run 'foreman init' first.")
+        sys.exit(1)
 
     console.print(f"[bold]Foreman[/bold] starting in {config.repo_root}")
     console.print(f"  Plans dir: {config.plans_dir}")
