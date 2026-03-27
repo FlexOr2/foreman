@@ -11,7 +11,19 @@ _DEPENDS_RE = re.compile(
     re.IGNORECASE,
 )
 _PHASE_RE = re.compile(r"^###\s+Phase\s+\d+", re.MULTILINE)
+_VALID_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 _SKIP_PREFIXES = ("draft-", "prompt-")
+
+
+class InvalidPlanNameError(ValueError):
+    def __init__(self, name: str, file_path: Path) -> None:
+        self.name = name
+        self.file_path = file_path
+        super().__init__(
+            f"Invalid plan name {name!r} (from {file_path.name}): "
+            "names must contain only alphanumerics, hyphens, dots, and underscores, "
+            "and must not start with a special character"
+        )
 
 
 @dataclass
@@ -30,6 +42,10 @@ def is_plan_file(path: Path) -> bool:
 
 
 def parse_plan(file_path: Path) -> Plan:
+    name = file_path.stem
+    if not _VALID_NAME_RE.match(name):
+        raise InvalidPlanNameError(name, file_path)
+
     content = file_path.read_text(encoding="utf-8")
 
     depends_on: list[str] = []
@@ -41,7 +57,7 @@ def parse_plan(file_path: Path) -> Plan:
     phases = [m.group().strip("# ") for m in _PHASE_RE.finditer(content)]
 
     return Plan(
-        name=file_path.stem,
+        name=name,
         file_path=file_path,
         depends_on=depends_on,
         phases=phases,
