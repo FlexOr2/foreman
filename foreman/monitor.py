@@ -10,7 +10,7 @@ from typing import Callable, Coroutine
 from asyncinotify import Inotify, Mask
 
 from foreman.plan_parser import is_plan_file
-from foreman.spawner import AGENT_TYPE_SEP
+from foreman.spawner import AGENT_TYPE_SEP, Spawner
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +66,65 @@ class StuckDetector:
             timer.cancel()
         self._timers.clear()
         self._active_plans.clear()
+
+
+IDLE_PROMPT = "\u276f"
+TOOL_RUNNING_MARKER = "esc to interrupt"
+IDLE_POLL_INTERVAL = 10
+IDLE_THRESHOLD_CONSECUTIVE = 3
+
+
+class CompletionDetector:
+    def __init__(self, spawner: Spawner) -> None:
+        self._spawner = spawner
+        self._active: dict[str, str] = {}
+        self._idle_counts: dict[str, int] = {}
+        self._task: asyncio.Task | None = None
+
+    def track(self, plan_name: str, terminal_name: str) -> None:
+        self._active[plan_name] = terminal_name
+        self._idle_counts[plan_name] = 0
+
+    def cancel(self, plan_name: str) -> None:
+        self._active.pop(plan_name, None)
+        self._idle_counts.pop(plan_name, None)
+
+    def cancel_all(self) -> None:
+        self._active.clear()
+        self._idle_counts.clear()
+        if self._task:
+            self._task.cancel()
+
+    def start(self, shutdown: asyncio.Event) -> asyncio.Task:
+        self._task = asyncio.get_running_loop().create_task(self._poll_loop(shutdown))
+        return self._task
+
+    async def _poll_loop(self, shutdown: asyncio.Event) -> None:
+        while not shutdown.is_set():
+            try:
+                await asyncio.wait_for(shutdown.wait(), timeout=IDLE_POLL_INTERVAL)
+                return
+            except asyncio.TimeoutError:
+                pass
+
+            for plan_name in list(self._active):
+                terminal = self._active.get(plan_name)
+                if not terminal:
+                    continue
+
+                content = await self._spawner._capture_pane(terminal)
+                if not content:
+                    continue
+
+                if IDLE_PROMPT in content and TOOL_RUNNING_MARKER not in content.lower():
+                    self._idle_counts[plan_name] = self._idle_counts.get(plan_name, 0) + 1
+                else:
+                    self._idle_counts[plan_name] = 0
+
+                if self._idle_counts[plan_name] >= IDLE_THRESHOLD_CONSECUTIVE:
+                    log.info("Agent %s idle for %ds, sending /exit", plan_name, self._idle_counts[plan_name] * IDLE_POLL_INTERVAL)
+                    self._idle_counts[plan_name] = 0
+                    await self._spawner.backend.send_text(terminal, "/exit")
 
 
 async def watch_plans(

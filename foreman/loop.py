@@ -13,9 +13,10 @@ from asyncinotify import Mask
 from foreman.brain import ForemanBrain
 from foreman.innovate import innovate
 from foreman.config import Config
+from foreman.preflight import check_prerequisites
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict
 from foreman.dashboard import run_dashboard
-from foreman.monitor import StuckDetector, watch_done, watch_logs, watch_plans
+from foreman.monitor import CompletionDetector, StuckDetector, watch_done, watch_logs, watch_plans
 from foreman.plan_parser import Plan, load_plans
 from foreman.resolver import CircularDependencyError, get_ready_plans, validate_dag
 from foreman.spawner import AGENT_TYPE_SEP, Spawner, _log_filename
@@ -41,12 +42,14 @@ class ForemanLoop:
             config.timeouts.stuck_threshold,
             on_stuck=self._on_agent_stuck,
         )
+        self.completion = CompletionDetector(self.spawner)
         self._plans: dict[str, Plan] = {}
         self._pending_reviews: set[str] = set()
         self._schedule_event = asyncio.Event()
         self._shutdown = asyncio.Event()
 
     async def run(self) -> None:
+        check_prerequisites()
         self.config.ensure_dirs()
         await self.spawner.setup()
 
@@ -64,6 +67,7 @@ class ForemanLoop:
                 tg.create_task(self._scheduler())
                 tg.create_task(self._innovator_loop())
                 tg.create_task(run_dashboard(self.config, self.db, self._shutdown))
+                self.completion.start(self._shutdown)
                 tg.create_task(self._shutdown_waiter())
         except* KeyboardInterrupt:
             pass
@@ -81,6 +85,7 @@ class ForemanLoop:
     async def _graceful_shutdown(self) -> None:
         log.info("Shutting down...")
         self.stuck.cancel_all()
+        self.completion.cancel_all()
 
         count = self.db.mark_all_running_as_interrupted()
         if count:
@@ -159,6 +164,7 @@ class ForemanLoop:
             )
 
             self.stuck.cancel(plan_name)
+            self.completion.cancel(plan_name)
 
             sentinel_file = done_dir / sentinel_name
             sentinel_file.unlink(missing_ok=True)
@@ -259,6 +265,7 @@ class ForemanLoop:
         )
 
         self.stuck.track(plan.name)
+        self.completion.track(plan.name, self.spawner._terminal_name(plan.name, AgentType.IMPLEMENTATION))
 
     async def _on_implementation_done(self, plan_name: str) -> None:
         if self.config.agents.auto_review:
@@ -298,6 +305,7 @@ class ForemanLoop:
         )
 
         self.stuck.track(plan_name)
+        self.completion.track(plan_name, self.spawner._terminal_name(plan_name, AgentType.REVIEW))
         log.info("Spawned review agent for %s", plan_name)
 
     async def _on_review_done(self, plan_name: str) -> None:
@@ -387,6 +395,7 @@ class ForemanLoop:
         )
 
         self.stuck.track(plan_name)
+        self.completion.track(plan_name, self.spawner._terminal_name(plan_name, AgentType.FIX))
         log.info("Spawned fix agent for %s", plan_name)
 
     async def _on_fix_done(self, plan_name: str) -> None:
@@ -425,6 +434,15 @@ class ForemanLoop:
         log.info("Merged %s successfully", plan_name)
         self.db.set_plan_status(plan_name, PlanStatus.DONE)
         await remove_worktree(plan_name, self.config)
+        self._archive_plan(plan_name)
+
+    def _archive_plan(self, plan_name: str) -> None:
+        plan = self._plans.get(plan_name)
+        if not plan or not plan.file_path.exists():
+            return
+        archived = plan.file_path.parent / f"draft-{plan.file_path.name}"
+        plan.file_path.rename(archived)
+        log.info("Archived plan %s → %s", plan.file_path.name, archived.name)
 
     async def _brain_resolve_conflict(self, plan_name: str, branch: str) -> bool:
         conflict_files = await get_conflict_files(self.config.repo_root)

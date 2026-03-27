@@ -232,6 +232,8 @@ class Spawner:
         await self._wait_for_ready(terminal)
         await self.backend.send_text(terminal, initial_message)
         log.info("Sent initial message to %s agent for %s", agent_type.value, plan.name)
+
+        await self._confirm_paste_if_needed(terminal)
         return pid
 
     async def _wait_for_ready(self, terminal: str, timeout: int = 60) -> None:
@@ -251,6 +253,16 @@ class Spawner:
         if proc.returncode != 0:
             return None
         return stdout.decode()
+
+    async def _confirm_paste_if_needed(self, terminal: str) -> None:
+        await asyncio.sleep(2)
+        content = await self._capture_pane(terminal)
+        if content and "[Pasted text" in content:
+            log.info("Paste confirmation detected in %s, sending Enter", terminal)
+            proc = await asyncio.create_subprocess_exec(
+                "tmux", "send-keys", "-t", f"{TMUX_SESSION}:{terminal}", "Enter",
+            )
+            await proc.wait()
 
     async def notify_agent(self, plan_name: str, agent_type: AgentType, message: str) -> None:
         await self.backend.send_text(self._terminal_name(plan_name, agent_type), message)
