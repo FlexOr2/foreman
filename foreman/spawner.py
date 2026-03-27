@@ -152,7 +152,6 @@ def _build_launcher_script(
     worktree_path: Path,
     agent_type: AgentType,
     config: Config,
-    initial_message: str,
 ) -> str:
     prompt_path = config.get_prompt_path(agent_type).resolve()
     plans_dir = config.plans_dir.resolve()
@@ -175,8 +174,6 @@ def _build_launcher_script(
 
     if tools:
         cmd_parts.append(f"  --allowed-tools {shlex.quote(tools)}")
-
-    cmd_parts.append(f"  {shlex.quote(initial_message)}")
 
     lines.append(" \\\n".join(cmd_parts))
     sentinel_name = f"{plan.name}{AGENT_TYPE_SEP}{agent_type.value}"
@@ -211,7 +208,7 @@ class Spawner:
         initial_message: str,
     ) -> int | None:
         script_content = _build_launcher_script(
-            plan, worktree_path, agent_type, self.config, initial_message,
+            plan, worktree_path, agent_type, self.config,
         )
 
         script_path = self.config.scripts_dir / _script_filename(plan.name, agent_type)
@@ -231,7 +228,18 @@ class Spawner:
 
         pid = await self.backend.get_pid(terminal)
         log.info("Spawned %s agent for %s (PID: %s)", agent_type.value, plan.name, pid)
+
+        await self._wait_for_ready(log_file)
+        await self.backend.send_text(terminal, initial_message)
+        log.info("Sent initial message to %s agent for %s", agent_type.value, plan.name)
         return pid
+
+    async def _wait_for_ready(self, log_file: Path, timeout: int = 30) -> None:
+        for _ in range(timeout * 2):
+            if log_file.stat().st_size > 0:
+                await asyncio.sleep(1)
+                return
+            await asyncio.sleep(0.5)
 
     async def notify_agent(self, plan_name: str, agent_type: AgentType, message: str) -> None:
         await self.backend.send_text(self._terminal_name(plan_name, agent_type), message)
