@@ -10,7 +10,6 @@ _DEPENDS_RE = re.compile(
     r">\s*\*\*Depends\s+on:\s*(.*?)\*\*",
     re.IGNORECASE,
 )
-_PHASE_RE = re.compile(r"^###\s+Phase\s+\d+", re.MULTILINE)
 _VALID_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 _SKIP_PREFIXES = ("draft-", "prompt-")
 
@@ -31,7 +30,6 @@ class Plan:
     name: str
     file_path: Path
     depends_on: list[str] = field(default_factory=list)
-    phases: list[str] = field(default_factory=list)
 
 
 def is_plan_file(path: Path) -> bool:
@@ -54,13 +52,10 @@ def parse_plan(file_path: Path) -> Plan:
         raw = match.group(1).strip()
         depends_on = [dep.strip() for dep in raw.split(",") if dep.strip()]
 
-    phases = [m.group().strip("# ") for m in _PHASE_RE.finditer(content)]
-
     return Plan(
         name=name,
         file_path=file_path,
         depends_on=depends_on,
-        phases=phases,
     )
 
 
