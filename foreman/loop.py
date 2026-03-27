@@ -438,9 +438,9 @@ class ForemanLoop:
             self._restart_pending = True
 
     async def _try_restart(self) -> None:
-        running = self.db.get_running_plan_names()
-        if running:
-            log.info("Restart pending — waiting for %d active agents to finish", len(running))
+        active = self.db.get_active_plan_names()
+        if active:
+            log.info("Restart pending — waiting for %d active agents to finish", len(active))
             return
 
         if self._pending_reviews:
@@ -459,7 +459,11 @@ class ForemanLoop:
         await self.spawner.teardown()
 
         log.info("Restarting foreman to apply self-improvements")
-        os.execv(sys.executable, [sys.executable, "-m", "foreman.cli", "start"])
+        args = [sys.executable, "-m", "foreman.cli", "start",
+                "--repo", str(self.config.repo_root)]
+        if log.getEffectiveLevel() <= logging.DEBUG:
+            args.append("--debug")
+        os.execv(sys.executable, args)
 
     async def _brain_resolve_conflict(self, plan_name: str, branch: str) -> bool:
         conflict_files = await get_conflict_files(self.config.repo_root)
