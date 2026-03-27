@@ -212,6 +212,9 @@ class ForemanLoop:
         if not done_dir.exists():
             return
         for sentinel in sorted(done_dir.iterdir()):
+            if sentinel.name.endswith(".tmp"):
+                sentinel.unlink(missing_ok=True)
+                continue
             if sentinel.is_file():
                 log.info("Processing stale sentinel: %s", sentinel.name)
                 await self._handle_agent_done(sentinel.name)

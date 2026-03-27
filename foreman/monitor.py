@@ -202,7 +202,7 @@ async def watch_done(
     done_dir.mkdir(parents=True, exist_ok=True)
 
     with Inotify() as inotify:
-        inotify.add_watch(done_dir, Mask.CREATE | Mask.MOVED_TO)
+        inotify.add_watch(done_dir, Mask.MOVED_TO)
         log.info("Watching done directory: %s", done_dir)
 
         async for event in inotify:

@@ -223,7 +223,8 @@ def _build_launcher_script(
 
     lines.append(" \\\n".join(cmd_parts))
     sentinel_name = f"{plan.name}{AGENT_TYPE_SEP}{agent_type.value}"
-    lines.append(f"echo $? > {shlex.quote(str(done_dir / sentinel_name))}")
+    sentinel_path = shlex.quote(str(done_dir / sentinel_name))
+    lines.append(f"_ec=$?; echo $_ec > {sentinel_path}.tmp && mv {sentinel_path}.tmp {sentinel_path}")
     return "\n".join(lines) + "\n"
 
 
