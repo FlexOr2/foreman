@@ -240,6 +240,7 @@ class Spawner:
             if pane_content and "\u276f" in pane_content:
                 return
             await asyncio.sleep(1)
+        raise TimeoutError(f"Agent in terminal {terminal!r} did not become ready within {timeout}s")
 
     async def _capture_pane(self, terminal: str) -> str | None:
         proc = await asyncio.create_subprocess_exec(
