@@ -23,6 +23,7 @@ class TimeoutConfig:
     implementation: int = 1800
     review: int = 600
     stuck_threshold: int = 300
+    brain_timeout: int = 300
 
 
 @dataclass

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import time
 from pathlib import Path
 
 import foreman.config as _config
@@ -21,11 +23,12 @@ def _read_file_or_none(path: Path) -> str | None:
 
 
 class ForemanBrain:
-    def __init__(self, foreman_dir: Path, allowed_tools: str, permission_mode: str) -> None:
+    def __init__(self, foreman_dir: Path, allowed_tools: str, permission_mode: str, timeout: int = 300) -> None:
         self._session_file = foreman_dir / "session_id"
         self._context_file = foreman_dir / "context.md"
         self._allowed_tools = allowed_tools
         self._permission_mode = permission_mode
+        self._timeout = timeout
         self._lock = asyncio.Lock()
         self.session_id: str | None = _read_file_or_none(self._session_file)
         if self.session_id:
@@ -39,6 +42,10 @@ class ForemanBrain:
         async with self._lock:
             try:
                 return await self._invoke(prompt)
+            except asyncio.TimeoutError:
+                self.session_id = None
+                self.save()
+                raise
             except Exception:
                 log.warning("Brain invocation failed, starting fresh session", exc_info=True)
                 self.session_id = None
@@ -63,8 +70,26 @@ class ForemanBrain:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        stdout, stderr = await proc.communicate()
+
+        start = time.monotonic()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self._timeout,
+            )
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - start
+            log.error(
+                "Brain invocation timed out after %.0fs (prompt_len=%d, session=%s)",
+                elapsed, len(prompt), self.session_id,
+            )
+            try:
+                os.killpg(proc.pid, 9)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
+            await proc.wait()
+            raise
 
         if proc.returncode != 0:
             raise RuntimeError(f"Brain claude -p failed (rc={proc.returncode}): {stderr.decode().strip()}")
