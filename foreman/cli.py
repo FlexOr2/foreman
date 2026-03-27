@@ -21,6 +21,7 @@ from foreman.plan_parser import InvalidPlanNameError, load_plans
 from foreman.preflight import check_git_repo, check_prerequisites
 from foreman.resolver import CircularDependencyError, UnresolvedDependencyError, compute_waves
 from foreman.spawner import Spawner
+from foreman.worktree import remove_worktree
 
 app = cyclopts.App(
     name="foreman",
@@ -537,6 +538,26 @@ def innovate(
 
 
 @app.command
+def retry(plan_name: str, repo: Path = Path(".")) -> None:
+    """Retry a failed or blocked plan — removes worktree, re-queues for next scheduler cycle."""
+    _setup_logging()
+    config = load_config(repo.resolve())
+    db = CoordinationDB(config.coordination_db)
+
+    try:
+        status = db.get_plan_status(plan_name)
+        if status not in (PlanStatus.FAILED, PlanStatus.BLOCKED):
+            console.print(f"[yellow]Plan {plan_name} is not failed or blocked[/yellow] (status: {status})")
+            return
+
+        asyncio.run(remove_worktree(plan_name, config))
+        db.set_plan_status(plan_name, PlanStatus.QUEUED)
+        console.print(f"Re-queued [bold]{plan_name}[/bold] — will be picked up on next scheduler cycle")
+    finally:
+        db.close()
+
+
+@app.command
 def reset(repo: Path = Path(".")) -> None:
     """Reset coordination DB and clean up worktrees."""
     _setup_logging()
@@ -551,7 +572,7 @@ def reset(repo: Path = Path(".")) -> None:
     import shutil
 
     async def cleanup() -> None:
-        from foreman.worktree import list_worktrees, remove_worktree
+        from foreman.worktree import list_worktrees
         worktrees = await list_worktrees(config)
         await asyncio.gather(*[remove_worktree(wt.plan_name, config) for wt in worktrees])
 
