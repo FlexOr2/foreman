@@ -185,7 +185,7 @@ class VSCodeBackend(Backend):
 AGENT_TYPE_SEP = "__"
 
 
-def _log_filename(plan_name: str, agent_type: AgentType) -> str:
+def log_filename(plan_name: str, agent_type: AgentType) -> str:
     return f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}.log"
 
 
@@ -262,7 +262,7 @@ class Spawner:
         script_path.write_text(script_content)
         script_path.chmod(0o755)
 
-        log_file = self.config.log_dir / _log_filename(plan.name, agent_type)
+        log_file = self.config.log_dir / log_filename(plan.name, agent_type)
         log_file.touch()
 
         terminal = self.terminal_name(plan.name, agent_type)
