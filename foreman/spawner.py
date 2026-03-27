@@ -234,10 +234,15 @@ class Spawner:
         log.info("Sent initial message to %s agent for %s", agent_type.value, plan.name)
         return pid
 
-    async def _wait_for_ready(self, log_file: Path, timeout: int = 30) -> None:
+    async def _wait_for_ready(self, log_file: Path, timeout: int = 60) -> None:
         for _ in range(timeout * 2):
-            if log_file.stat().st_size > 0:
-                await asyncio.sleep(1)
+            try:
+                content = log_file.read_bytes()
+            except FileNotFoundError:
+                await asyncio.sleep(0.5)
+                continue
+            if b"work on" in content or b"?" in content[-200:]:
+                await asyncio.sleep(0.5)
                 return
             await asyncio.sleep(0.5)
 
