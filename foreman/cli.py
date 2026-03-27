@@ -14,7 +14,7 @@ import cyclopts
 from rich.console import Console
 from rich.table import Table
 
-from foreman.config import load_config
+from foreman.config import RESTART_EXIT_CODE, load_config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.loop import ForemanLoop
 from foreman.plan_parser import InvalidPlanNameError, load_plans
@@ -27,6 +27,7 @@ app = cyclopts.App(
     help="AI agent orchestrator for parallel Claude Code execution.",
 )
 console = Console()
+log = logging.getLogger(__name__)
 
 
 class _JSONFormatter(logging.Formatter):
@@ -173,7 +174,12 @@ def start(
     console.print(f"  Model: {config.agents.model}")
     console.print()
 
-    asyncio.run(ForemanLoop(config).run())
+    while True:
+        exit_code = asyncio.run(ForemanLoop(config).run())
+        if exit_code != RESTART_EXIT_CODE:
+            break
+        log.info("Restarting foreman to apply self-improvements...")
+        config = load_config(repo.resolve())
 
 
 @app.command

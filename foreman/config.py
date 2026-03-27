@@ -10,6 +10,7 @@ from foreman.coordination import AgentType, StuckAction
 
 CLAUDE_BIN = "claude"
 
+RESTART_EXIT_CODE = 75
 PROCESS_POLL_INTERVAL = 2
 SQLITE_BUSY_TIMEOUT_MS = 5000
 

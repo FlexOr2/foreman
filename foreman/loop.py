@@ -5,16 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import signal
-import sys
 from pathlib import Path
 
 from asyncinotify import Mask
 
 from foreman.brain import ForemanBrain
 from foreman.innovate import innovate
-from foreman.config import Config
+from foreman.config import RESTART_EXIT_CODE, Config
 from foreman.preflight import check_prerequisites
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict, StuckAction
 from foreman.dashboard import run_dashboard
@@ -58,7 +56,7 @@ class ForemanLoop:
         self._schedule_event = asyncio.Event()
         self._shutdown = asyncio.Event()
 
-    async def run(self) -> None:
+    async def run(self) -> int:
         check_prerequisites()
         self.config.ensure_dirs()
         await self.spawner.setup()
@@ -84,6 +82,8 @@ class ForemanLoop:
             pass
         finally:
             await self._graceful_shutdown()
+
+        return RESTART_EXIT_CODE if self._restart_pending else 0
 
     def _request_shutdown(self) -> None:
         log.info("Shutdown requested")
@@ -530,25 +530,8 @@ class ForemanLoop:
             log.info("Restart pending — waiting for %d pending reviews", len(self._pending_reviews))
             return
 
-        log.info("All agents finished — preparing to restart")
-
-        try:
-            await self.brain.summarize_and_reset()
-        except Exception:
-            log.warning("Brain summarization failed before restart", exc_info=True)
-            self.brain.save()
-
-        self.db.close()
-
-        await self.spawner.kill_session()
-        log.info("Killed tmux session before restart")
-
-        log.info("Restarting foreman to apply self-improvements")
-        args = [sys.executable, "-m", "foreman.cli", "start",
-                "--repo", str(self.config.repo_root)]
-        if log.getEffectiveLevel() <= logging.DEBUG:
-            args.append("--debug")
-        os.execv(sys.executable, args)
+        log.info("All agents finished — restarting to apply self-improvements")
+        self._request_shutdown()
 
     async def _brain_resolve_conflict(self, plan_name: str, branch: str) -> bool:
         conflict_files = await get_conflict_files(self.config.repo_root)
