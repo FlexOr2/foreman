@@ -182,7 +182,8 @@ class ForemanLoop:
         try:
             return int(done_file.read_text().strip())
         except (ValueError, FileNotFoundError):
-            return 0
+            log.warning("Sentinel file missing or unreadable for %s, treating as crash", sentinel_name)
+            return 1
 
     # --- Scheduling ---
 
@@ -224,7 +225,12 @@ class ForemanLoop:
         reviewing_count = len(self.db.get_plans_by_status(PlanStatus.REVIEWING))
         while self._pending_reviews and reviewing_count < self.config.agents.max_parallel_reviews:
             plan_name = self._pending_reviews.pop()
-            await self._spawn_review(plan_name)
+            try:
+                await self._spawn_review(plan_name)
+            except Exception:
+                log.error("Failed to spawn review for %s", plan_name, exc_info=True)
+                self._pending_reviews.add(plan_name)
+                break
             reviewing_count += 1
 
     # --- Implementation agents ---
@@ -322,7 +328,7 @@ class ForemanLoop:
 
         elif decision == ReviewVerdict.FINDINGS:
             review_count = self._get_review_count(plan_name)
-            if review_count >= self.config.agents.max_review_retries:
+            if review_count > self.config.agents.max_review_retries:
                 log.warning("Max review retries reached for %s", plan_name)
                 self.db.set_plan_status(
                     plan_name, PlanStatus.BLOCKED,
