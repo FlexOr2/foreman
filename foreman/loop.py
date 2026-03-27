@@ -16,8 +16,13 @@ from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict
 from foreman.dashboard import run_dashboard
 from foreman.monitor import StuckDetector, watch_done, watch_logs, watch_plans
-from foreman.plan_parser import Plan, load_plans
-from foreman.resolver import CircularDependencyError, get_ready_plans, validate_dag
+from foreman.plan_parser import InvalidPlanNameError, Plan, load_plans
+from foreman.resolver import (
+    CircularDependencyError,
+    UnresolvedDependencyError,
+    get_ready_plans,
+    validate_dag,
+)
 from foreman.spawner import AGENT_TYPE_SEP, Spawner, _log_filename
 from foreman.worktree import (
     abort_merge, complete_merge, create_worktree, get_conflict_files,
@@ -99,12 +104,11 @@ class ForemanLoop:
     # --- Plan scanning ---
 
     async def _scan_plans(self) -> None:
-        plans = load_plans(self.config.plans_dir)
-
         try:
+            plans = load_plans(self.config.plans_dir)
             validate_dag(plans)
-        except CircularDependencyError as e:
-            log.error("Circular dependency: %s", e)
+        except (InvalidPlanNameError, CircularDependencyError, UnresolvedDependencyError) as e:
+            log.error("%s", e)
             return
 
         self._plans = {p.name: p for p in plans}

@@ -14,9 +14,9 @@ from rich.table import Table
 from foreman.config import load_config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.loop import ForemanLoop
-from foreman.plan_parser import load_plans
+from foreman.plan_parser import InvalidPlanNameError, load_plans
 from foreman.preflight import check_git_repo, check_prerequisites
-from foreman.resolver import CircularDependencyError, compute_waves
+from foreman.resolver import CircularDependencyError, UnresolvedDependencyError, compute_waves
 from foreman.spawner import Spawner
 
 app = cyclopts.App(
@@ -148,7 +148,11 @@ def plan(repo: Path = Path(".")) -> None:
     """Dry run — analyze plans and show execution order."""
     _setup_logging()
     config = load_config(repo.resolve())
-    plans = load_plans(config.plans_dir)
+    try:
+        plans = load_plans(config.plans_dir)
+    except InvalidPlanNameError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
 
     if not plans:
         console.print("[yellow]No plans found[/yellow] in", config.plans_dir)
@@ -156,7 +160,7 @@ def plan(repo: Path = Path(".")) -> None:
 
     try:
         waves = compute_waves(plans)
-    except CircularDependencyError as e:
+    except (CircularDependencyError, UnresolvedDependencyError) as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
 

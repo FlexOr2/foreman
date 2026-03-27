@@ -11,13 +11,31 @@ class CircularDependencyError(Exception):
         super().__init__(f"Circular dependency detected: {' -> '.join(cycle)}")
 
 
+class UnresolvedDependencyError(Exception):
+    def __init__(self, unresolved: dict[str, list[str]]) -> None:
+        self.unresolved = unresolved
+        details = "; ".join(
+            f"{plan} -> {', '.join(deps)}" for plan, deps in unresolved.items()
+        )
+        super().__init__(f"Unresolved dependencies: {details}")
+
+
 def _unmet_deps(plan: Plan, completed: set[str]) -> list[str]:
     return [d for d in plan.depends_on if d not in completed]
 
 
 def validate_dag(plans: list[Plan]) -> None:
     plan_names = {p.name for p in plans}
-    adjacency = {p.name: [d for d in p.depends_on if d in plan_names] for p in plans}
+
+    unresolved = {
+        p.name: [d for d in p.depends_on if d not in plan_names]
+        for p in plans
+        if any(d not in plan_names for d in p.depends_on)
+    }
+    if unresolved:
+        raise UnresolvedDependencyError(unresolved)
+
+    adjacency = {p.name: list(p.depends_on) for p in plans}
 
     WHITE, GRAY, BLACK = 0, 1, 2
     color = {name: WHITE for name in plan_names}
