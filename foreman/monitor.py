@@ -79,7 +79,6 @@ class CompletionDetector:
         self._spawner = spawner
         self._active: dict[str, str] = {}
         self._idle_counts: dict[str, int] = {}
-        self._task: asyncio.Task | None = None
 
     def track(self, plan_name: str, terminal_name: str) -> None:
         self._active[plan_name] = terminal_name
@@ -92,14 +91,8 @@ class CompletionDetector:
     def cancel_all(self) -> None:
         self._active.clear()
         self._idle_counts.clear()
-        if self._task:
-            self._task.cancel()
 
-    def start(self, shutdown: asyncio.Event) -> asyncio.Task:
-        self._task = asyncio.get_running_loop().create_task(self._poll_loop(shutdown))
-        return self._task
-
-    async def _poll_loop(self, shutdown: asyncio.Event) -> None:
+    async def poll_loop(self, shutdown: asyncio.Event) -> None:
         while not shutdown.is_set():
             try:
                 await asyncio.wait_for(shutdown.wait(), timeout=IDLE_POLL_INTERVAL)

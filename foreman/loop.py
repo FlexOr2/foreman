@@ -67,7 +67,7 @@ class ForemanLoop:
                 tg.create_task(self._scheduler())
                 tg.create_task(self._innovator_loop())
                 tg.create_task(run_dashboard(self.config, self.db, self._shutdown))
-                self.completion.start(self._shutdown)
+                tg.create_task(self.completion.poll_loop(self._shutdown))
                 tg.create_task(self._shutdown_waiter())
         except* KeyboardInterrupt:
             pass
@@ -265,7 +265,7 @@ class ForemanLoop:
         )
 
         self.stuck.track(plan.name)
-        self.completion.track(plan.name, self.spawner._terminal_name(plan.name, AgentType.IMPLEMENTATION))
+        self.completion.track(plan.name, self.spawner.terminal_name(plan.name, AgentType.IMPLEMENTATION))
 
     async def _on_implementation_done(self, plan_name: str) -> None:
         if self.config.agents.auto_review:
@@ -305,7 +305,7 @@ class ForemanLoop:
         )
 
         self.stuck.track(plan_name)
-        self.completion.track(plan_name, self.spawner._terminal_name(plan_name, AgentType.REVIEW))
+        self.completion.track(plan_name, self.spawner.terminal_name(plan_name, AgentType.REVIEW))
         log.info("Spawned review agent for %s", plan_name)
 
     async def _on_review_done(self, plan_name: str) -> None:
@@ -395,7 +395,7 @@ class ForemanLoop:
         )
 
         self.stuck.track(plan_name)
-        self.completion.track(plan_name, self.spawner._terminal_name(plan_name, AgentType.FIX))
+        self.completion.track(plan_name, self.spawner.terminal_name(plan_name, AgentType.FIX))
         log.info("Spawned fix agent for %s", plan_name)
 
     async def _on_fix_done(self, plan_name: str) -> None:

@@ -197,7 +197,7 @@ class Spawner:
     async def teardown(self) -> None:
         await self.backend.teardown()
 
-    def _terminal_name(self, plan_name: str, agent_type: AgentType) -> str:
+    def terminal_name(self, plan_name: str, agent_type: AgentType) -> str:
         return f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}"
 
     async def spawn_agent(
@@ -218,7 +218,7 @@ class Spawner:
         log_file = self.config.log_dir / _log_filename(plan.name, agent_type)
         log_file.touch()
 
-        terminal = self._terminal_name(plan.name, agent_type)
+        terminal = self.terminal_name(plan.name, agent_type)
         await self.backend.kill_terminal(terminal)
         await self.backend.create_terminal(
             name=terminal,
@@ -265,7 +265,7 @@ class Spawner:
             await proc.wait()
 
     async def notify_agent(self, plan_name: str, agent_type: AgentType, message: str) -> None:
-        await self.backend.send_text(self._terminal_name(plan_name, agent_type), message)
+        await self.backend.send_text(self.terminal_name(plan_name, agent_type), message)
 
     async def kill_agent(self, plan_name: str, agent_type: AgentType) -> None:
-        await self.backend.kill_terminal(self._terminal_name(plan_name, agent_type))
+        await self.backend.kill_terminal(self.terminal_name(plan_name, agent_type))
