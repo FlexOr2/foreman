@@ -175,10 +175,16 @@ def start(
     console.print()
 
     while True:
-        exit_code = asyncio.run(ForemanLoop(config).run())
+        try:
+            exit_code = asyncio.run(ForemanLoop(config).run())
+        except (KeyboardInterrupt, SystemExit):
+            break
+        except Exception:
+            log.error("Foreman crashed", exc_info=True)
+            break
         if exit_code != RESTART_EXIT_CODE:
             break
-        log.info("Restarting foreman to apply self-improvements...")
+        console.print("[bold]Foreman[/bold] restarting to apply self-improvements...")
         config = load_config(repo.resolve())
 
 
