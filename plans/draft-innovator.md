@@ -24,16 +24,24 @@ foreman innovate
 │  1. EXPLORE                                                 │
 │     Read codebase structure, dependencies, recent git log   │
 │     Read README, CLAUDE.md, config files, entry points      │
-│     Optionally: web search for ecosystem trends, CVEs       │
+│     With --web: search for competing tools, ecosystem       │
+│       trends, emerging patterns, user complaints about      │
+│       similar apps, feature requests in the space           │
 │                                                             │
 │  2. PROVOKE                                                 │
-│     Ask the brain targeted provocative questions:           │
+│     Two modes of thinking:                                  │
+│                                                             │
+│     Defensive (what's broken/risky):                        │
 │     - "What's the biggest risk nobody is addressing?"       │
 │     - "What would fail first under 10x load?"              │
-│     - "What would a new developer find most confusing?"    │
-│     - "What's the highest-impact, lowest-effort change?"   │
-│     - "What dependency is a ticking time bomb?"            │
 │     - "Where is the code lying to itself?"                 │
+│                                                             │
+│     Creative (what's possible/missing):                     │
+│     - "What would make users say 'I can't believe it       │
+│       can do that'?"                                        │
+│     - "What gap has every tool in this space missed?"       │
+│     - "What emerging tech could transform this app?"        │
+│                                                             │
 │     Brain produces N candidate ideas (raw, unfiltered)      │
 │                                                             │
 │  3. SHAPE                                                   │
@@ -186,6 +194,38 @@ The innovation quality depends on asking the right questions. These are not gene
 - "What configuration option exists but appears unused?"
 - "What error message would confuse a user?"
 
+### Feature Innovation
+- "What's the natural next feature that users would expect but doesn't exist yet?"
+- "What data does this app already have access to that it's not using to create value?"
+- "What manual workflow does this app automate only halfway?"
+- "What would make a user say 'I can't believe this can do that' — the wow-factor feature?"
+- "What would turn this from a tool people use into a tool people recommend?"
+- "What integration with another system would unlock a completely new use case?"
+- "What would this app look like if it could predict what the user wants next?"
+
+### Competitive Edge
+- "What do similar tools in this space do that this app doesn't?"
+- "What do similar tools get wrong that this app could get right?"
+- "What's the one thing no tool in this space does — the gap everyone has missed?"
+- "What approach from a completely different domain could be applied here?"
+- "If this app had to justify a 10x price increase, what features would it need?"
+- "What would make this app the default choice over every alternative?"
+
+### User Delight
+- "Where does the user have to think when the app should think for them?"
+- "What takes the user out of their flow that could be eliminated?"
+- "What would make the first 5 minutes of using this app feel magical?"
+- "What feedback loops are missing — where does the user do something but never learn if it worked?"
+- "What power-user shortcut is hiding that should be a first-class feature?"
+- "What would make users feel like this app understands their work?"
+
+### Moonshots
+- "If there were no technical constraints, what would the ideal version of this app do?"
+- "What emerging technology (AI, WebAssembly, edge computing, etc.) could transform what this app is capable of?"
+- "What would this app look like if it could collaborate with the user in real time?"
+- "What if this app could learn from how each user works and adapt itself?"
+- "What's the version of this app that makes its own category — not competing with existing tools but creating a new space?"
+
 ## CLI Interface
 
 ```bash
@@ -207,8 +247,14 @@ foreman innovate --skip-review
 # Only run review on existing draft plans (no new ideas)
 foreman innovate --review-only
 
-# Use specific question categories
+# Focus on defensive improvements
 foreman innovate --categories risk,architecture
+
+# Focus on creative/product ideas
+foreman innovate --categories features,competitive,moonshots
+
+# Full spectrum — defensive + creative
+foreman innovate --categories all
 ```
 
 ## Implementation
@@ -264,7 +310,7 @@ Use `--json-schema` for reviewer verdicts:
 ```toml
 [foreman.innovate]
 max_ideas = 10
-categories = ["risk", "performance", "architecture", "debt", "dx"]
+categories = ["risk", "performance", "architecture", "debt", "dx", "features", "competitive", "delight", "moonshots"]
 review_rounds = 3
 max_revisions_per_round = 1
 
