@@ -555,9 +555,9 @@ Built with **cyclopts**.
 - [x] Spawner auto-detects extension socket, falls back to tmux (implemented in Phase 1)
 - [x] Auto-activates when `.foreman/` directory exists
 
-### Phase 5: Dashboard & Polish
-- [ ] Rich TUI dashboard with separate worker/review slot counts
-- [ ] Brain session summarization
+### Phase 5: Dashboard & Polish ✓
+- [x] Rich Live dashboard with worker/review slot counts, plan status, time-ago display
+- [x] Brain session summarization on graceful shutdown (context preserved to `.foreman/context.md`)
 
 ### Phase 6: Interactive Mode
 - [ ] Pause/resume agents

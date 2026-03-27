@@ -13,6 +13,7 @@ from asyncinotify import Mask
 from foreman.brain import ForemanBrain
 from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict
+from foreman.dashboard import run_dashboard
 from foreman.monitor import StuckDetector, watch_done, watch_logs, watch_plans
 from foreman.plan_parser import Plan, load_plans
 from foreman.resolver import CircularDependencyError, get_ready_plans, validate_dag
@@ -60,6 +61,7 @@ class ForemanLoop:
                 tg.create_task(self._log_watcher())
                 tg.create_task(self._done_watcher())
                 tg.create_task(self._scheduler())
+                tg.create_task(run_dashboard(self.config, self.db, self._shutdown))
                 tg.create_task(self._shutdown_waiter())
         except* KeyboardInterrupt:
             pass
@@ -82,7 +84,12 @@ class ForemanLoop:
         if count:
             log.info("Marked %d plans as INTERRUPTED", count)
 
-        self.brain.save()
+        try:
+            await self.brain.summarize_and_reset()
+        except Exception:
+            log.warning("Brain summarization failed", exc_info=True)
+            self.brain.save()
+
         self.db.close()
         await self.spawner.teardown()
         log.info("Shutdown complete. tmux session left alive for manual inspection.")
