@@ -33,6 +33,8 @@ from foreman.worktree import (
 
 log = logging.getLogger(__name__)
 
+WATCHDOG_INTERVAL = 30
+
 
 class ForemanLoop:
     def __init__(self, config: Config) -> None:
@@ -80,6 +82,7 @@ class ForemanLoop:
                 tg.create_task(self._log_watcher())
                 tg.create_task(self._done_watcher())
                 tg.create_task(self._scheduler())
+                tg.create_task(self._watchdog_loop())
                 tg.create_task(self._innovator_loop())
                 tg.create_task(run_dashboard(self.config, self.db, self._shutdown))
                 tg.create_task(self.completion.poll_loop(self._shutdown))
@@ -276,6 +279,67 @@ class ForemanLoop:
         except (ValueError, FileNotFoundError):
             log.warning("Sentinel file missing or unreadable for %s, treating as crash", sentinel_name)
             return 1
+
+    # --- Watchdog ---
+
+    async def _watchdog_loop(self) -> None:
+        while not self._shutdown.is_set():
+            try:
+                await asyncio.wait_for(self._shutdown.wait(), timeout=WATCHDOG_INTERVAL)
+                return
+            except asyncio.TimeoutError:
+                pass
+            await self._reconcile_orphaned_plans()
+
+    async def _reconcile_orphaned_plans(self) -> None:
+        running = self.db.get_plans_by_status(PlanStatus.RUNNING) + self.db.get_plans_by_status(PlanStatus.REVIEWING)
+        reconciled = False
+
+        for plan_data in running:
+            plan_name = plan_data["plan"]
+            agent_type = self.db.get_active_agent_type(plan_name)
+            if not agent_type:
+                continue
+
+            terminal = self.spawner.terminal_name(plan_name, agent_type)
+            if await self.spawner.has_window(terminal):
+                continue
+
+            log.warning("Orphaned plan %s — agent window gone, processing completion", plan_name)
+            self.stuck.cancel(plan_name)
+            self.completion.cancel(plan_name)
+            self._active_agent_ids.pop(plan_name, None)
+
+            sentinel_name = f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}"
+            sentinel_file = self.config.repo_root / ".foreman" / "done" / sentinel_name
+            if sentinel_file.exists():
+                exit_code = self._read_exit_code(sentinel_name)
+                sentinel_file.unlink(missing_ok=True)
+                if exit_code == 0:
+                    await self._dispatch_agent_done(plan_name, agent_type)
+                else:
+                    self.db.set_plan_status(plan_name, PlanStatus.FAILED)
+                    self._cascade_failure(plan_name)
+            else:
+                worktree_path = plan_data.get("worktree_path")
+                if worktree_path:
+                    await self._dispatch_agent_done(plan_name, agent_type)
+                else:
+                    self.db.set_plan_status(plan_name, PlanStatus.FAILED)
+                    self._cascade_failure(plan_name)
+
+            reconciled = True
+
+        if reconciled:
+            self._schedule_event.set()
+
+    async def _dispatch_agent_done(self, plan_name: str, agent_type: AgentType) -> None:
+        if agent_type == AgentType.IMPLEMENTATION:
+            await self._on_implementation_done(plan_name)
+        elif agent_type == AgentType.REVIEW:
+            await self._on_review_done(plan_name)
+        elif agent_type == AgentType.FIX:
+            await self._on_fix_done(plan_name)
 
     # --- Scheduling ---
 
@@ -597,8 +661,18 @@ class ForemanLoop:
     async def _try_restart(self) -> None:
         active = self.db.get_active_plan_names()
         if active:
-            log.info("Restart pending — waiting for %d active agents to finish", len(active))
-            return
+            truly_active = False
+            for plan_name in active:
+                agent_type = self.db.get_active_agent_type(plan_name)
+                if agent_type:
+                    terminal = self.spawner.terminal_name(plan_name, agent_type)
+                    if await self.spawner.has_window(terminal):
+                        truly_active = True
+                        break
+            if truly_active:
+                log.info("Restart pending — waiting for %d active agents to finish", len(active))
+                return
+            log.info("All agent windows gone — proceeding with restart")
 
         if self._pending_reviews:
             log.info("Restart pending — waiting for %d pending reviews", len(self._pending_reviews))
