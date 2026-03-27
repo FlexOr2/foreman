@@ -34,6 +34,13 @@ class AgentConfig:
 
 
 @dataclass
+class AnalyzeConfig:
+    max_plans: int = 10
+    include_patterns: list[str] = field(default_factory=lambda: ["*.py", "*.ts", "*.js", "*.go", "*.rs", "*.java"])
+    exclude_patterns: list[str] = field(default_factory=lambda: [".venv", "node_modules", "dist", "__pycache__", ".git"])
+
+
+@dataclass
 class Config:
     plans_dir: Path = field(default_factory=lambda: Path("plans"))
     prompts_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/prompts"))
@@ -51,6 +58,7 @@ class Config:
 
     timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
     agents: AgentConfig = field(default_factory=AgentConfig)
+    analyze: AnalyzeConfig = field(default_factory=AnalyzeConfig)
 
     allowed_tools: dict[str, str] = field(default_factory=lambda: {
         AgentType.REVIEW: "Read,Glob,Grep,Bash,Write",
@@ -116,6 +124,11 @@ def load_config(repo_root: Path | None = None) -> Config:
             for key, value in foreman["agents"].items():
                 if hasattr(config.agents, key):
                     setattr(config.agents, key, value)
+
+        if "analyze" in foreman:
+            for key, value in foreman["analyze"].items():
+                if hasattr(config.analyze, key):
+                    setattr(config.analyze, key, value)
 
         if "allowed_tools" in foreman:
             config.allowed_tools.update(foreman["allowed_tools"])
