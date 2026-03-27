@@ -549,10 +549,11 @@ Built with **cyclopts**.
 - [x] First-finished-first-merged ordering (inherent — first done triggers merge)
 - [x] Escalation to user for complex conflicts (BLOCKED + reason)
 
-### Phase 4: VS Code Extension (foreman-vscode)
-- [ ] TypeScript extension with IPC server (Unix socket)
-- [ ] `create_terminal` / `kill_terminal` / `send_text` commands
-- [ ] Spawner auto-detects extension socket, falls back to tmux
+### Phase 4: VS Code Extension (foreman-vscode) ✓
+- [x] TypeScript extension with IPC server (Unix socket at `.foreman/extension.sock`)
+- [x] `create_terminal` / `kill_terminal` / `send_text` commands
+- [x] Spawner auto-detects extension socket, falls back to tmux (implemented in Phase 1)
+- [x] Auto-activates when `.foreman/` directory exists
 
 ### Phase 5: Dashboard & Polish
 - [ ] Rich TUI dashboard with separate worker/review slot counts

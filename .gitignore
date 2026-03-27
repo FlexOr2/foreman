@@ -13,5 +13,9 @@ build/
 .idea/
 .vscode/
 
+# VS Code Extension
+foreman-vscode/node_modules/
+foreman-vscode/out/
+
 # OS
 .DS_Store

@@ -1,0 +1,34 @@
+{
+  "name": "foreman-vscode",
+  "displayName": "Foreman",
+  "description": "VS Code terminal backend for Foreman agent orchestrator",
+  "version": "0.1.0",
+  "publisher": "foreman",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["workspaceContains:.foreman"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "foreman.start",
+        "title": "Foreman: Start IPC Server"
+      },
+      {
+        "command": "foreman.stop",
+        "title": "Foreman: Stop IPC Server"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
