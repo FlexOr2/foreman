@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import signal
 from pathlib import Path
@@ -11,11 +12,11 @@ from asyncinotify import Mask
 
 from foreman.brain import ForemanBrain
 from foreman.config import Config
-from foreman.coordination import AgentType, CoordinationDB, PlanStatus
+from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict
 from foreman.monitor import StuckDetector, watch_done, watch_logs, watch_plans
 from foreman.plan_parser import Plan, load_plans
 from foreman.resolver import CircularDependencyError, get_ready_plans, validate_dag
-from foreman.spawner import Spawner, _log_filename
+from foreman.spawner import AGENT_TYPE_SEP, Spawner, _log_filename
 from foreman.worktree import abort_merge, create_worktree, merge_branch, remove_worktree
 
 log = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class ForemanLoop:
             on_stuck=self._on_agent_stuck,
         )
         self._plans: dict[str, Plan] = {}
+        self._pending_reviews: set[str] = set()
         self._schedule_event = asyncio.Event()
         self._shutdown = asyncio.Event()
 
@@ -113,9 +115,10 @@ class ForemanLoop:
             elif mask & Mask.MODIFY:
                 status = self.db.get_plan_status(name)
                 if status == PlanStatus.RUNNING:
-                    log.info("Plan %s modified while running, notifying agent", name)
+                    agent_type = self.db.get_active_agent_type(name) or AgentType.IMPLEMENTATION
+                    log.info("Plan %s modified while running, notifying %s agent", name, agent_type.value)
                     await self.spawner.notify_agent(
-                        name,
+                        name, agent_type,
                         f"The plan has been updated. Re-read {file_path} and adapt your approach.",
                     )
                 else:
@@ -129,24 +132,41 @@ class ForemanLoop:
     async def _done_watcher(self) -> None:
         done_dir = self.config.repo_root / ".foreman" / "done"
 
-        async def on_done(plan_name: str) -> None:
-            exit_code = self._read_exit_code(plan_name)
-            log.info("Agent for %s finished (exit code: %s)", plan_name, exit_code)
+        async def on_done(sentinel_name: str) -> None:
+            if AGENT_TYPE_SEP in sentinel_name:
+                plan_name, type_str = sentinel_name.split(AGENT_TYPE_SEP, 1)
+                agent_type = AgentType(type_str)
+            else:
+                plan_name = sentinel_name
+                agent_type = AgentType.IMPLEMENTATION
+
+            exit_code = self._read_exit_code(sentinel_name)
+            log.info(
+                "Agent %s/%s finished (exit code: %s)",
+                plan_name, agent_type.value, exit_code,
+            )
 
             self.stuck.cancel(plan_name)
 
-            if exit_code == 0:
-                await self._on_agent_success(plan_name)
-            else:
+            sentinel_file = done_dir / sentinel_name
+            sentinel_file.unlink(missing_ok=True)
+
+            if exit_code != 0:
                 self.db.set_plan_status(plan_name, PlanStatus.FAILED)
-                log.error("Agent for %s failed (exit code %s)", plan_name, exit_code)
+                log.error("Agent %s/%s failed (exit code %s)", plan_name, agent_type.value, exit_code)
+            elif agent_type == AgentType.IMPLEMENTATION:
+                await self._on_implementation_done(plan_name)
+            elif agent_type == AgentType.REVIEW:
+                await self._on_review_done(plan_name)
+            elif agent_type == AgentType.FIX:
+                await self._on_fix_done(plan_name)
 
             self._schedule_event.set()
 
         await watch_done(done_dir, on_done)
 
-    def _read_exit_code(self, plan_name: str) -> int:
-        done_file = self.config.repo_root / ".foreman" / "done" / plan_name
+    def _read_exit_code(self, sentinel_name: str) -> int:
+        done_file = self.config.repo_root / ".foreman" / "done" / sentinel_name
         try:
             return int(done_file.read_text().strip())
         except (ValueError, FileNotFoundError):
@@ -156,16 +176,16 @@ class ForemanLoop:
 
     async def _scheduler(self) -> None:
         while not self._shutdown.is_set():
-            await self._try_spawn_ready()
             self._schedule_event.clear()
-            done, _ = await asyncio.wait(
+            await self._try_spawn_ready()
+            done, pending = await asyncio.wait(
                 [
                     asyncio.create_task(self._schedule_event.wait()),
                     asyncio.create_task(self._shutdown.wait()),
                 ],
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            for task in _:
+            for task in pending:
                 task.cancel()
 
     async def _try_spawn_ready(self) -> None:
@@ -184,6 +204,14 @@ class ForemanLoop:
                 break
             await self._spawn_implementation(plan)
             worker_count += 1
+
+        reviewing_count = len(self.db.get_plans_by_status(PlanStatus.REVIEWING))
+        while self._pending_reviews and reviewing_count < self.config.agents.max_parallel_reviews:
+            plan_name = self._pending_reviews.pop()
+            await self._spawn_review(plan_name)
+            reviewing_count += 1
+
+    # --- Implementation agents ---
 
     async def _spawn_implementation(self, plan: Plan) -> None:
         log.info("Spawning implementation agent for %s", plan.name)
@@ -216,7 +244,142 @@ class ForemanLoop:
 
         self.stuck.track(plan.name)
 
-    async def _on_agent_success(self, plan_name: str) -> None:
+    async def _on_implementation_done(self, plan_name: str) -> None:
+        if self.config.agents.auto_review:
+            self._pending_reviews.add(plan_name)
+            self._schedule_event.set()
+        else:
+            await self._merge_plan(plan_name)
+
+    # --- Review agents ---
+
+    async def _spawn_review(self, plan_name: str) -> None:
+        plan = self._plans.get(plan_name)
+        plan_data = self.db.get_plan(plan_name)
+        if not plan or not plan_data:
+            return
+
+        await self.spawner.kill_agent(plan_name, AgentType.IMPLEMENTATION)
+        await self.spawner.kill_agent(plan_name, AgentType.FIX)
+
+        self.db.set_plan_status(plan_name, PlanStatus.REVIEWING)
+
+        worktree_path = Path(plan_data["worktree_path"])
+        plan_file = plan.file_path.resolve()
+        initial_message = (
+            f"Review the changes on this branch against main. "
+            f"The original plan is at {plan_file}."
+        )
+
+        pid = await self.spawner.spawn_agent(
+            plan, worktree_path, AgentType.REVIEW, initial_message,
+        )
+
+        self.db.add_agent(
+            plan_name, AgentType.REVIEW,
+            pid=pid,
+            log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.REVIEW)),
+        )
+
+        self.stuck.track(plan_name)
+        log.info("Spawned review agent for %s", plan_name)
+
+    async def _on_review_done(self, plan_name: str) -> None:
+        plan_data = self.db.get_plan(plan_name)
+        if not plan_data:
+            return
+
+        verdict = self._read_review_verdict(plan_data["worktree_path"])
+
+        if verdict is None:
+            self.db.set_plan_status(
+                plan_name, PlanStatus.BLOCKED,
+                reason="Review verdict unreadable or missing",
+            )
+            return
+
+        decision = verdict.get("verdict")
+
+        if decision == ReviewVerdict.CLEAN:
+            log.info("Review passed for %s", plan_name)
+            await self._merge_plan(plan_name)
+
+        elif decision == ReviewVerdict.FINDINGS:
+            review_count = self._get_review_count(plan_name)
+            if review_count >= self.config.agents.max_review_retries:
+                log.warning("Max review retries reached for %s", plan_name)
+                self.db.set_plan_status(
+                    plan_name, PlanStatus.BLOCKED,
+                    reason="Max review retries exceeded",
+                )
+            else:
+                issues = verdict.get("issues", [])
+                log.info("Review found %d issues for %s, spawning fix agent", len(issues), plan_name)
+                await self._spawn_fix(plan_name, issues)
+
+        elif decision == ReviewVerdict.ARCHITECTURAL:
+            reason = verdict.get("reason", "Architectural problem")
+            log.warning("Architectural issue in %s: %s", plan_name, reason)
+            self.db.set_plan_status(plan_name, PlanStatus.BLOCKED, reason=reason)
+
+        else:
+            self.db.set_plan_status(
+                plan_name, PlanStatus.BLOCKED,
+                reason=f"Unknown review verdict: {decision}",
+            )
+
+    def _read_review_verdict(self, worktree_path: str) -> dict | None:
+        verdict_file = Path(worktree_path) / "REVIEW_VERDICT.json"
+        try:
+            return json.loads(verdict_file.read_text())
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            log.warning("Could not read REVIEW_VERDICT.json from %s", worktree_path)
+            return None
+
+    def _get_review_count(self, plan_name: str) -> int:
+        agents = self.db.get_agents_for_plan(plan_name)
+        return sum(1 for a in agents if a["type"] == AgentType.REVIEW)
+
+    # --- Fix agents ---
+
+    async def _spawn_fix(self, plan_name: str, issues: list[str]) -> None:
+        plan = self._plans.get(plan_name)
+        plan_data = self.db.get_plan(plan_name)
+        if not plan or not plan_data:
+            return
+
+        await self.spawner.kill_agent(plan_name, AgentType.REVIEW)
+
+        self.db.set_plan_status(plan_name, PlanStatus.RUNNING)
+
+        worktree_path = Path(plan_data["worktree_path"])
+        plan_file = plan.file_path.resolve()
+        initial_message = (
+            f"Fix the issues found during review. "
+            f"Original plan: {plan_file}. "
+            f"Review findings: {json.dumps(issues)}"
+        )
+
+        pid = await self.spawner.spawn_agent(
+            plan, worktree_path, AgentType.FIX, initial_message,
+        )
+
+        self.db.add_agent(
+            plan_name, AgentType.FIX,
+            pid=pid,
+            log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.FIX)),
+        )
+
+        self.stuck.track(plan_name)
+        log.info("Spawned fix agent for %s", plan_name)
+
+    async def _on_fix_done(self, plan_name: str) -> None:
+        self._pending_reviews.add(plan_name)
+        self._schedule_event.set()
+
+    # --- Merge ---
+
+    async def _merge_plan(self, plan_name: str) -> None:
         plan_data = self.db.get_plan(plan_name)
         if not plan_data:
             return

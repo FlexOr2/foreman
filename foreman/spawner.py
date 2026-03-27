@@ -135,12 +135,15 @@ class VSCodeBackend(Backend):
         await self._send({"action": "kill_terminal", "name": name})
 
 
+AGENT_TYPE_SEP = "__"
+
+
 def _log_filename(plan_name: str, agent_type: AgentType) -> str:
-    return f"{plan_name}-{agent_type.value}.log"
+    return f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}.log"
 
 
 def _script_filename(plan_name: str, agent_type: AgentType) -> str:
-    return f"{plan_name}-{agent_type.value}.sh"
+    return f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}.sh"
 
 
 def _build_launcher_script(
@@ -175,8 +178,8 @@ def _build_launcher_script(
     cmd_parts.append(f"  {shlex.quote(initial_message)}")
 
     lines.append(" \\\n".join(cmd_parts))
-    # Write sentinel file on exit so inotify can detect completion
-    lines.append(f"touch {shlex.quote(str(done_dir / plan.name))}")
+    sentinel_name = f"{plan.name}{AGENT_TYPE_SEP}{agent_type.value}"
+    lines.append(f"echo $? > {shlex.quote(str(done_dir / sentinel_name))}")
     return "\n".join(lines) + "\n"
 
 
@@ -196,6 +199,9 @@ class Spawner:
     async def teardown(self) -> None:
         await self.backend.teardown()
 
+    def _terminal_name(self, plan_name: str, agent_type: AgentType) -> str:
+        return f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}"
+
     async def spawn_agent(
         self,
         plan: Plan,
@@ -212,21 +218,21 @@ class Spawner:
         script_path.chmod(0o755)
 
         log_file = self.config.log_dir / _log_filename(plan.name, agent_type)
-        # inotify needs the file to exist before it can watch
         log_file.touch()
 
+        terminal = self._terminal_name(plan.name, agent_type)
         await self.backend.create_terminal(
-            name=plan.name,
+            name=terminal,
             command=f"bash {shlex.quote(str(script_path))}",
             log_file=log_file,
         )
 
-        pid = await self.backend.get_pid(plan.name)
+        pid = await self.backend.get_pid(terminal)
         log.info("Spawned %s agent for %s (PID: %s)", agent_type.value, plan.name, pid)
         return pid
 
-    async def notify_agent(self, plan_name: str, message: str) -> None:
-        await self.backend.send_text(plan_name, message)
+    async def notify_agent(self, plan_name: str, agent_type: AgentType, message: str) -> None:
+        await self.backend.send_text(self._terminal_name(plan_name, agent_type), message)
 
-    async def kill_agent(self, plan_name: str) -> None:
-        await self.backend.kill_terminal(plan_name)
+    async def kill_agent(self, plan_name: str, agent_type: AgentType) -> None:
+        await self.backend.kill_terminal(self._terminal_name(plan_name, agent_type))

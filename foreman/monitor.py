@@ -10,6 +10,7 @@ from typing import Callable, Coroutine
 from asyncinotify import Inotify, Mask
 
 from foreman.plan_parser import is_plan_file
+from foreman.spawner import AGENT_TYPE_SEP
 
 log = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ async def watch_logs(
             filename = str(event.name)
             if not filename.endswith(".log"):
                 continue
-            plan_name = filename.rsplit("-", 1)[0] if "-" in filename else filename.removesuffix(".log")
+            plan_name = filename.split(AGENT_TYPE_SEP, 1)[0] if AGENT_TYPE_SEP in filename else filename.removesuffix(".log")
             on_activity(plan_name)
 
 

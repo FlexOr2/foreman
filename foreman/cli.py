@@ -129,13 +129,20 @@ def status(repo: Path = Path(".")) -> None:
 
 @app.command
 def kill(plan_name: str, repo: Path = Path(".")) -> None:
-    """Kill a stuck agent."""
+    """Kill all agents for a plan."""
     _setup_logging()
     config = load_config(repo.resolve())
 
+    from foreman.coordination import AgentType
     from foreman.spawner import Spawner
-    asyncio.run(Spawner(config).kill_agent(plan_name))
-    console.print(f"Killed agent for [bold]{plan_name}[/bold]")
+
+    async def _kill_all() -> None:
+        spawner = Spawner(config)
+        for agent_type in AgentType:
+            await spawner.kill_agent(plan_name, agent_type)
+
+    asyncio.run(_kill_all())
+    console.print(f"Killed agents for [bold]{plan_name}[/bold]")
 
 
 @app.command

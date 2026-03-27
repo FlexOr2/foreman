@@ -26,6 +26,12 @@ class AgentType(StrEnum):
     FIX = "fix"
 
 
+class ReviewVerdict(StrEnum):
+    CLEAN = "clean"
+    FINDINGS = "findings"
+    ARCHITECTURAL = "architectural"
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS plans (
     plan TEXT PRIMARY KEY,
@@ -182,6 +188,13 @@ class CoordinationDB:
             "SELECT * FROM agents WHERE plan=? ORDER BY started_at", (plan,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_active_agent_type(self, plan: str) -> AgentType | None:
+        row = self._conn.execute(
+            "SELECT type FROM agents WHERE plan=? AND finished_at IS NULL ORDER BY started_at DESC LIMIT 1",
+            (plan,),
+        ).fetchone()
+        return AgentType(row["type"]) if row else None
 
     def reset(self) -> None:
         self._conn.executescript("DELETE FROM agents; DELETE FROM plans;")
