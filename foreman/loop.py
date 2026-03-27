@@ -612,6 +612,7 @@ class ForemanLoop:
         success, output = await complete_merge(
             self.config.repo_root,
             f"Merge branch '{branch}' (conflict resolved by Foreman brain)",
+            files=conflict_files,
         )
         if not success:
             log.error("Failed to complete merge after resolution: %s", output)
