@@ -20,3 +20,4 @@ Write one of these JSON objects to `REVIEW_VERDICT.json`:
 - If you find fixable issues, be specific about what needs to change and where
 - If you find an architectural problem that can't be fixed in-place, explain why clearly
 - Focus on substance: correctness, security, completeness. Don't nitpick style
+- After writing REVIEW_VERDICT.json, run /exit to signal completion
