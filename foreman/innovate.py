@@ -266,7 +266,7 @@ def _parse_draft_plans(brain_output: str) -> list[tuple[str, str]]:
     return plans
 
 
-async def _invoke_reviewer(prompt: str, permission_mode: str) -> str:
+async def _invoke_reviewer(prompt: str, permission_mode: str, timeout: int) -> str:
     cmd = [
         _config.CLAUDE_BIN, "-p", prompt,
         "--output-format", "json",
@@ -279,7 +279,12 @@ async def _invoke_reviewer(prompt: str, permission_mode: str) -> str:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await proc.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise
 
     if proc.returncode != 0:
         raise RuntimeError(f"Reviewer failed (rc={proc.returncode}): {stderr.decode().strip()}")
@@ -394,6 +399,7 @@ async def adversarial_review(
     plan_text: str,
     permission_mode: str,
     brain: ForemanBrain,
+    reviewer_timeout: int,
     on_review: _ReviewCallback | None = None,
 ) -> tuple[bool, str]:
     feedback_history: list[tuple[str, str]] = []
@@ -402,7 +408,14 @@ async def adversarial_review(
         review_input = _build_review_input(reviewer_name, reviewer_prompt, plan_text, feedback_history)
 
         log.info("Review round %d/%d (%s)", round_num, len(REVIEWERS), reviewer_name)
-        result_text = await _invoke_reviewer(review_input, permission_mode)
+        try:
+            result_text = await _invoke_reviewer(review_input, permission_mode, reviewer_timeout)
+        except asyncio.TimeoutError:
+            verdict = ReviewResult(action=Verdict.KILL, reason=f"timed out after {reviewer_timeout}s", demands=[])
+            if on_review:
+                on_review(reviewer_name, verdict)
+            log.info("Plan killed by %s: %s", reviewer_name, verdict.reason)
+            return False, f"Killed by {reviewer_name}: {verdict.reason}"
         verdict = _parse_verdict(result_text)
 
         if on_review:
@@ -506,7 +519,8 @@ async def innovate(
 
         log.info("Reviewing plan: %s", slug)
         survived, final_text = await adversarial_review(
-            plan_text, config.agents.permission_mode, brain, on_review,
+            plan_text, config.agents.permission_mode, brain,
+            config.innovate.reviewer_timeout, on_review,
         )
         if survived:
             survivors.append((slug, final_text))
@@ -542,7 +556,8 @@ async def review_existing_drafts(
         log.info("Reviewing existing draft: %s", draft_path.name)
 
         survived, final_text = await adversarial_review(
-            plan_text, config.agents.permission_mode, brain, on_review,
+            plan_text, config.agents.permission_mode, brain,
+            config.innovate.reviewer_timeout, on_review,
         )
 
         if survived:

@@ -54,6 +54,7 @@ class InnovateConfig:
     interval: int = 600
     max_ideas: int = 10
     skip_review: bool = False
+    reviewer_timeout: int = 600
     categories: list[str] = field(default_factory=lambda: list(ALL_IDEA_CATEGORIES))
 
 
