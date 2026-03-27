@@ -24,7 +24,7 @@ from foreman.resolver import (
     get_ready_plans,
     validate_dag,
 )
-from foreman.spawner import AGENT_TYPE_SEP, Spawner, _log_filename
+from foreman.spawner import AGENT_TYPE_SEP, Spawner, log_filename
 from foreman.worktree import (
     abort_merge, branch_has_commits, complete_merge, create_worktree,
     get_conflict_files, get_merge_diff, merge_branch, merge_touched_self,
@@ -358,7 +358,7 @@ class ForemanLoop:
                 agent_id = self.db.add_agent(
                     plan.name, AgentType.IMPLEMENTATION,
                     pid=pid,
-                    log_file=str(self.config.log_dir / _log_filename(plan.name, AgentType.IMPLEMENTATION)),
+                    log_file=str(self.config.log_dir / log_filename(plan.name, AgentType.IMPLEMENTATION)),
                 )
                 self._active_agent_ids[plan.name] = agent_id
         except BaseException:
@@ -409,7 +409,7 @@ class ForemanLoop:
             agent_id = self.db.add_agent(
                 plan_name, AgentType.REVIEW,
                 pid=pid,
-                log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.REVIEW)),
+                log_file=str(self.config.log_dir / log_filename(plan_name, AgentType.REVIEW)),
             )
             self._active_agent_ids[plan_name] = agent_id
 
@@ -513,7 +513,7 @@ class ForemanLoop:
             agent_id = self.db.add_agent(
                 plan_name, AgentType.FIX,
                 pid=pid,
-                log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.FIX)),
+                log_file=str(self.config.log_dir / log_filename(plan_name, AgentType.FIX)),
             )
             self._active_agent_ids[plan_name] = agent_id
 
