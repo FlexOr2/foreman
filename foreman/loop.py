@@ -11,7 +11,7 @@ from pathlib import Path
 from asyncinotify import Mask
 
 from foreman.brain import ForemanBrain
-from foreman.innovate import innovate
+from foreman.innovate import INNOVATOR_MARKER, innovate
 from foreman.config import RESTART_EXIT_CODE, Config
 from foreman.preflight import check_prerequisites
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict, StuckAction
@@ -599,8 +599,11 @@ class ForemanLoop:
 
     # --- Background innovation ---
 
-    def _count_drafts(self) -> int:
-        return sum(1 for _ in self.config.plans_dir.glob("draft-*.md"))
+    def _count_innovator_plans(self) -> int:
+        return sum(
+            1 for f in self.config.plans_dir.glob("*.md")
+            if INNOVATOR_MARKER in f.read_text(encoding="utf-8")[:100]
+        )
 
     async def _innovator_loop(self) -> None:
         if not self.config.innovate.enabled:
@@ -611,7 +614,7 @@ class ForemanLoop:
                 log.info("Innovator pausing for restart")
                 return
 
-            if self._count_drafts() < self.config.innovate.max_drafts:
+            if self._count_innovator_plans() < self.config.innovate.max_drafts:
                 self._innovator_running = True
                 try:
                     await innovate(

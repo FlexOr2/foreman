@@ -44,6 +44,7 @@ ALL_IDEA_CATEGORIES = [
 @dataclass
 class InnovateConfig:
     enabled: bool = False
+    auto_activate: bool = False
     max_drafts: int = 5
     interval: int = 600
     max_ideas: int = 10

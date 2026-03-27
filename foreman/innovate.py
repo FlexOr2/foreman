@@ -427,20 +427,26 @@ async def adversarial_review(
     return True, plan_text
 
 
-def _write_draft_plans(plans_dir: Path, plans: list[tuple[str, str]]) -> list[Path]:
+INNOVATOR_MARKER = "<!-- foreman:innovator -->"
+
+
+def _write_plans(plans_dir: Path, plans: list[tuple[str, str]], *, auto_activate: bool) -> list[Path]:
     plans_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
 
+    prefix = "" if auto_activate else "draft-"
+
     for slug, content in plans:
-        draft_path = plans_dir / f"draft-{slug}.md"
+        path = plans_dir / f"{prefix}{slug}.md"
         counter = 1
-        while draft_path.exists():
-            draft_path = plans_dir / f"draft-{slug}-{counter}.md"
+        while path.exists():
+            path = plans_dir / f"{prefix}{slug}-{counter}.md"
             counter += 1
 
-        draft_path.write_text(content + "\n", encoding="utf-8")
-        written.append(draft_path)
-        log.info("Wrote draft plan: %s", draft_path.name)
+        marked_content = f"{INNOVATOR_MARKER}\n{content}\n"
+        path.write_text(marked_content, encoding="utf-8")
+        written.append(path)
+        log.info("Wrote %s plan: %s", "active" if auto_activate else "draft", path.name)
 
     return written
 
@@ -490,7 +496,7 @@ async def innovate(
     log.info("Shaped %d candidate ideas into plans", len(plans))
 
     if skip_review:
-        return _write_draft_plans(config.plans_dir, plans)
+        return _write_plans(config.plans_dir, plans, auto_activate=config.innovate.auto_activate)
 
     survivors: list[tuple[str, str]] = []
     for slug, plan_text in plans:
@@ -505,7 +511,7 @@ async def innovate(
         if survived:
             survivors.append((slug, final_text))
 
-    return _write_draft_plans(config.plans_dir, survivors)
+    return _write_plans(config.plans_dir, survivors, auto_activate=config.innovate.auto_activate)
 
 
 async def review_existing_drafts(
