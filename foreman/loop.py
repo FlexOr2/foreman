@@ -55,6 +55,7 @@ class ForemanLoop:
         self._pending_reviews: set[str] = set()
         self._stuck_warned: set[str] = set()
         self._restart_pending = False
+        self._innovator_running = False
         self._schedule_event = asyncio.Event()
         self._shutdown = asyncio.Event()
 
@@ -530,6 +531,10 @@ class ForemanLoop:
             log.info("Restart pending — waiting for %d pending reviews", len(self._pending_reviews))
             return
 
+        if self._innovator_running:
+            log.info("Restart pending — waiting for innovator to finish current phase")
+            return
+
         log.info("All agents finished — preparing to restart")
 
         try:
@@ -617,13 +622,21 @@ class ForemanLoop:
 
         while not self._shutdown.is_set():
             if self._restart_pending:
+                log.info("Innovator pausing for restart")
                 return
 
             if self._count_drafts() < self.config.innovate.max_drafts:
-                await innovate(
-                    self.config,
-                    skip_review=self.config.innovate.skip_review,
-                )
+                self._innovator_running = True
+                try:
+                    await innovate(
+                        self.config,
+                        skip_review=self.config.innovate.skip_review,
+                        should_stop=lambda: self._restart_pending,
+                    )
+                finally:
+                    self._innovator_running = False
+                    if self._restart_pending:
+                        self._schedule_event.set()
 
             await self._wait_for_interval(self.config.innovate.interval)
 
