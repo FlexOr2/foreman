@@ -140,8 +140,8 @@ class CoordinationDB:
 
     def get_running_plan_names(self) -> set[str]:
         rows = self._conn.execute(
-            "SELECT plan FROM plans WHERE status IN (?, ?)",
-            (PlanStatus.RUNNING, PlanStatus.REVIEWING),
+            "SELECT plan FROM plans WHERE status NOT IN (?, ?)",
+            (PlanStatus.QUEUED, PlanStatus.DONE),
         ).fetchall()
         return {r["plan"] for r in rows}
 
