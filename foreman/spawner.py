@@ -35,6 +35,12 @@ class Backend(ABC):
     async def kill_terminal(self, name: str) -> None: ...
 
     @abstractmethod
+    async def has_terminal(self, name: str) -> bool: ...
+
+    @abstractmethod
+    async def kill_all(self) -> None: ...
+
+    @abstractmethod
     async def setup(self) -> None: ...
 
     @abstractmethod
@@ -115,6 +121,23 @@ class TmuxBackend(Backend):
         )
         await proc.wait()
 
+    async def has_terminal(self, name: str) -> bool:
+        proc = await asyncio.create_subprocess_exec(
+            "tmux", "has-window", "-t", f"{TMUX_SESSION}:{name}",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        return proc.returncode == 0
+
+    async def kill_all(self) -> None:
+        proc = await asyncio.create_subprocess_exec(
+            "tmux", "kill-session", "-t", TMUX_SESSION,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+
 
 class VSCodeBackend(Backend):
     def __init__(self, socket_path: Path) -> None:
@@ -151,6 +174,12 @@ class VSCodeBackend(Backend):
 
     async def kill_terminal(self, name: str) -> None:
         await self._send({"action": "kill_terminal", "name": name})
+
+    async def has_terminal(self, name: str) -> bool:
+        return False
+
+    async def kill_all(self) -> None:
+        pass
 
 
 AGENT_TYPE_SEP = "__"
@@ -278,21 +307,10 @@ class Spawner:
         await self.backend.send_text(self.terminal_name(plan_name, agent_type), message)
 
     async def has_window(self, terminal: str) -> bool:
-        proc = await asyncio.create_subprocess_exec(
-            "tmux", "has-window", "-t", f"{TMUX_SESSION}:{terminal}",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-        return proc.returncode == 0
+        return await self.backend.has_terminal(terminal)
 
     async def kill_session(self) -> None:
-        proc = await asyncio.create_subprocess_exec(
-            "tmux", "kill-session", "-t", TMUX_SESSION,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
+        await self.backend.kill_all()
 
     async def kill_agent(self, plan_name: str, agent_type: AgentType) -> None:
         await self.backend.kill_terminal(self.terminal_name(plan_name, agent_type))
