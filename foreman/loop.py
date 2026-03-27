@@ -125,9 +125,13 @@ class ForemanLoop:
 
         self._plans = {p.name: p for p in plans}
 
-        known_plans = {p["plan"] for p in self.db.get_all_plans()}
+        known_plans = {p["plan"]: p for p in self.db.get_all_plans()}
         for plan in plans:
-            if plan.name not in known_plans:
+            existing = known_plans.get(plan.name)
+            if existing and existing["status"] == PlanStatus.DONE:
+                plan.file_path.unlink(missing_ok=True)
+                log.info("Removed already-completed plan file: %s", plan.name)
+            elif plan.name not in known_plans:
                 self.db.upsert_plan(plan.name, PlanStatus.QUEUED)
                 log.info("New plan detected: %s", plan.name)
 
@@ -517,9 +521,8 @@ class ForemanLoop:
         plan = self._plans.get(plan_name)
         if not plan or not plan.file_path.exists():
             return
-        archived = plan.file_path.parent / f"draft-{plan.file_path.name}"
-        plan.file_path.rename(archived)
-        log.info("Archived plan %s → %s", plan.file_path.name, archived.name)
+        plan.file_path.unlink()
+        log.info("Removed completed plan %s", plan.file_path.name)
 
     async def _try_restart(self) -> None:
         active = self.db.get_active_plan_names()
