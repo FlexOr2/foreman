@@ -264,22 +264,29 @@ class ForemanLoop:
             f"Commit all your changes when done."
         )
 
-        pid = await self.spawner.spawn_agent(
-            plan, worktree_path, AgentType.IMPLEMENTATION, initial_message,
-        )
+        try:
+            pid = await self.spawner.spawn_agent(
+                plan, worktree_path, AgentType.IMPLEMENTATION, initial_message,
+            )
 
-        with self.db.tx():
-            self.db.upsert_plan(
-                plan.name,
-                PlanStatus.RUNNING,
-                branch=branch,
-                worktree_path=str(worktree_path),
-            )
-            self.db.add_agent(
-                plan.name, AgentType.IMPLEMENTATION,
-                pid=pid,
-                log_file=str(self.config.log_dir / _log_filename(plan.name, AgentType.IMPLEMENTATION)),
-            )
+            with self.db.tx():
+                self.db.upsert_plan(
+                    plan.name,
+                    PlanStatus.RUNNING,
+                    branch=branch,
+                    worktree_path=str(worktree_path),
+                )
+                self.db.add_agent(
+                    plan.name, AgentType.IMPLEMENTATION,
+                    pid=pid,
+                    log_file=str(self.config.log_dir / _log_filename(plan.name, AgentType.IMPLEMENTATION)),
+                )
+        except BaseException:
+            try:
+                await remove_worktree(plan.name, self.config)
+            except Exception:
+                log.warning("Failed to clean up worktree for %s", plan.name, exc_info=True)
+            raise
 
         self.stuck.track(plan.name)
         self.completion.track(plan.name, self.spawner.terminal_name(plan.name, AgentType.IMPLEMENTATION))
@@ -356,7 +363,11 @@ class ForemanLoop:
             else:
                 issues = verdict.get("issues", [])
                 log.info("Review found %d issues for %s, spawning fix agent", len(issues), plan_name)
-                await self._spawn_fix(plan_name, issues)
+                try:
+                    await self._spawn_fix(plan_name, issues)
+                except Exception:
+                    log.error("Failed to spawn fix agent for %s", plan_name, exc_info=True)
+                    self.db.set_plan_status(plan_name, PlanStatus.FAILED)
 
         elif decision == ReviewVerdict.ARCHITECTURAL:
             reason = verdict.get("reason", "Architectural problem")
