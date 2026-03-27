@@ -398,10 +398,10 @@ async def adversarial_review(
 ) -> tuple[bool, str]:
     feedback_history: list[tuple[str, str]] = []
 
-    for reviewer_name, reviewer_prompt in REVIEWERS:
+    for round_num, (reviewer_name, reviewer_prompt) in enumerate(REVIEWERS, 1):
         review_input = _build_review_input(reviewer_name, reviewer_prompt, plan_text, feedback_history)
 
-        log.info("Running %s review", reviewer_name)
+        log.info("Review round %d/%d (%s)", round_num, len(REVIEWERS), reviewer_name)
         result_text = await _invoke_reviewer(review_input, permission_mode)
         verdict = _parse_verdict(result_text)
 
@@ -468,12 +468,12 @@ async def innovate(
     )
 
     prompt = _build_explore_prompt(effective_categories, effective_max, scope_path, web)
-    log.info("Starting innovation with categories: %s", effective_categories)
+    log.info("Exploring codebase — categories: %s", ", ".join(effective_categories))
 
     result = await brain.think(prompt)
 
     if "NO_FINDINGS" in result:
-        log.info("Innovation complete — no findings")
+        log.info("Exploration complete — no findings")
         return []
 
     plans = _parse_draft_plans(result)
@@ -482,6 +482,7 @@ async def innovate(
         return []
 
     plans = plans[:effective_max]
+    log.info("Shaped %d candidate ideas into plans", len(plans))
 
     if skip_review:
         return _write_draft_plans(config.plans_dir, plans)

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
 from rich.console import Group
-from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
@@ -17,6 +18,24 @@ from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 
 REFRESH_INTERVAL = 2
+INNOVATOR_LOG_LINES = 10
+
+
+class RecentLogs(logging.Handler):
+
+    def __init__(self, maxlen: int = INNOVATOR_LOG_LINES):
+        super().__init__()
+        self._records: deque[logging.LogRecord] = deque(maxlen=maxlen)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._records.append(record)
+
+    def recent(self) -> list[logging.LogRecord]:
+        return list(self._records)
+
+
+_innovator_logs = RecentLogs()
+logging.getLogger("foreman.innovate").addHandler(_innovator_logs)
 
 STATUS_STYLES = {
     PlanStatus.QUEUED: "white",
@@ -124,12 +143,34 @@ def _build_summary(db: CoordinationDB) -> Text:
     return text
 
 
+def _build_innovator_panel() -> Panel | None:
+    records = _innovator_logs.recent()
+    if not records:
+        return None
+
+    lines = Text()
+    for i, record in enumerate(records):
+        if i > 0:
+            lines.append("\n")
+        ts = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime("%H:%M:%S")
+        lines.append(f"  {ts}  ", style="dim")
+        lines.append(record.getMessage())
+
+    return Panel(lines, title="Innovator Activity", border_style="dim yellow")
+
+
 def build_display(config: Config, db: CoordinationDB) -> Group:
-    return Group(
+    parts: list[Panel | Table | Text] = [
         _build_slots_panel(config, db),
         Panel(_build_plans_table(db), title="Plans", border_style="dim"),
-        _build_summary(db),
-    )
+    ]
+
+    innovator_panel = _build_innovator_panel()
+    if innovator_panel:
+        parts.append(innovator_panel)
+
+    parts.append(_build_summary(db))
+    return Group(*parts)
 
 
 async def run_dashboard(config: Config, db: CoordinationDB, shutdown: asyncio.Event) -> None:
