@@ -45,6 +45,15 @@ def _time_ago(iso_str: str | None) -> str:
         return ""
 
 
+def _analyzer_status(config: Config) -> str:
+    if not config.analyzers.enabled:
+        return "disabled"
+    draft_count = sum(1 for _ in config.plans_dir.glob("draft-*.md"))
+    if draft_count >= config.analyzers.max_drafts:
+        return f"paused ({draft_count}/{config.analyzers.max_drafts} drafts)"
+    return f"analyzing ({draft_count}/{config.analyzers.max_drafts} drafts)"
+
+
 def _build_slots_panel(config: Config, db: CoordinationDB) -> Panel:
     running = len(db.get_plans_by_status(PlanStatus.RUNNING))
     reviewing = len(db.get_plans_by_status(PlanStatus.REVIEWING))
@@ -53,6 +62,12 @@ def _build_slots_panel(config: Config, db: CoordinationDB) -> Panel:
     worker_text.append(f" Workers: {running}/{config.agents.max_parallel_workers} ", style="cyan")
     worker_text.append("  ")
     worker_text.append(f" Reviews: {reviewing}/{config.agents.max_parallel_reviews} ", style="blue")
+
+    if config.analyzers.enabled:
+        status = _analyzer_status(config)
+        style = "yellow" if "paused" in status else "green"
+        worker_text.append("  ")
+        worker_text.append(f" Analyzers: {status} ", style=style)
 
     return Panel(worker_text, title="Slots", border_style="dim")
 
