@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -204,6 +205,8 @@ class ReviewResult:
     demands: list[str]
 
 
+_ReviewCallback = Callable[[str, ReviewResult], None]
+
 _VERDICT_RE = re.compile(
     r"VERDICT:\s*(KILL|REVISE|PASS)\s*\n"
     r"REASON:\s*(.+?)(?:\nDEMANDS:\s*\n((?:- .+\n?)+))?$",
@@ -216,8 +219,8 @@ _PLAN_SEPARATOR = re.compile(r"^---\s*$", re.MULTILINE)
 def _parse_verdict(text: str) -> ReviewResult:
     match = _VERDICT_RE.search(text)
     if not match:
-        log.warning("Could not parse verdict, treating as PASS")
-        return ReviewResult(action=Verdict.PASS, reason="unparseable response", demands=[])
+        log.warning("Could not parse verdict, treating as KILL")
+        return ReviewResult(action=Verdict.KILL, reason="unparseable response", demands=[])
 
     action = Verdict(match.group(1))
     reason = match.group(2).strip()
@@ -227,6 +230,9 @@ def _parse_verdict(text: str) -> ReviewResult:
 
 
 def _select_questions(categories: list[str]) -> dict[str, list[str]]:
+    if "all" in categories:
+        return {cat.value: QUESTIONS[cat] for cat in IdeaCategory}
+
     selected: dict[str, list[str]] = {}
     for cat_name in categories:
         try:
@@ -265,6 +271,7 @@ async def _invoke_reviewer(prompt: str, permission_mode: str) -> str:
         _config.CLAUDE_BIN, "-p", prompt,
         "--output-format", "json",
         "--permission-mode", permission_mode,
+        "--allowed-tools", "",
     ]
 
     proc = await asyncio.create_subprocess_exec(
@@ -418,9 +425,6 @@ async def adversarial_review(
             )
 
     return True, plan_text
-
-
-_ReviewCallback = type(lambda name, verdict: None)
 
 
 def _write_draft_plans(plans_dir: Path, plans: list[tuple[str, str]]) -> list[Path]:
