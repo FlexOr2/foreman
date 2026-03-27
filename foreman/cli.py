@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import logging.handlers
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cyclopts
@@ -26,13 +29,44 @@ app = cyclopts.App(
 console = Console()
 
 
-def _setup_logging(debug: bool = False) -> None:
+class _JSONFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "module": record.name,
+            "msg": record.getMessage(),
+        }
+        if hasattr(record, "event"):
+            entry["event"] = record.event
+        for key in ("plan", "agent_type", "pid", "exit_code", "duration",
+                     "idle_seconds", "prompt_len", "response_len"):
+            if hasattr(record, key):
+                entry[key] = getattr(record, key)
+        return json.dumps(entry)
+
+
+LOG_FILE_MAX_BYTES = 5 * 1024 * 1024
+LOG_FILE_BACKUP_COUNT = 3
+
+
+def _setup_logging(debug: bool = False, log_file: Path | None = None) -> None:
     level = logging.DEBUG if debug else logging.INFO
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=LOG_FILE_MAX_BYTES,
+            backupCount=LOG_FILE_BACKUP_COUNT,
+        )
+        handler.setLevel(level)
+        handler.setFormatter(_JSONFormatter())
+        logging.getLogger().addHandler(handler)
 
 
 STATUS_STYLES = {
@@ -122,12 +156,11 @@ def start(
     debug: bool = False,
 ) -> None:
     """Start Foreman — enters the event loop, watches for plans, spawns agents."""
-    _setup_logging(debug)
+    config = load_config(repo.resolve())
+    _setup_logging(debug, log_file=config.log_file)
 
     if not check_prerequisites(console):
         sys.exit(1)
-
-    config = load_config(repo.resolve())
 
     if not config.plans_dir.exists():
         console.print(f"[yellow]No plans directory found.[/yellow] Run 'foreman init' first.")
@@ -209,6 +242,87 @@ def status(repo: Path = Path(".")) -> None:
 
     console.print(table)
     db.close()
+
+
+@app.command
+def logs(
+    repo: Path = Path("."),
+    plan: str | None = None,
+    level: str | None = None,
+    event: str | None = None,
+    follow: bool = False,
+    n: int = 50,
+) -> None:
+    """View structured logs with optional filters."""
+    config = load_config(repo.resolve())
+
+    if not config.log_file.exists():
+        console.print("[yellow]No log file found.[/yellow] Run 'foreman start' first.")
+        return
+
+    def _matches(entry: dict) -> bool:
+        if plan and entry.get("plan") != plan:
+            return False
+        if level and entry.get("level", "").upper() != level.upper():
+            return False
+        if event and event.lower() not in entry.get("event", "").lower() and event.lower() not in entry.get("msg", "").lower():
+            return False
+        return True
+
+    def _print_entry(entry: dict) -> None:
+        ts = entry.get("ts", "")[:19]
+        lvl = entry.get("level", "?")
+        style = {"ERROR": "red", "WARNING": "yellow", "DEBUG": "dim"}.get(lvl, "")
+        module = entry.get("module", "")
+        msg = entry.get("event", entry.get("msg", ""))
+        extra_keys = [k for k in entry if k not in ("ts", "level", "module", "msg", "event")]
+        extra = " ".join(f"{k}={entry[k]}" for k in extra_keys) if extra_keys else ""
+        line = f"{ts} [{lvl}] {module}: {msg}"
+        if extra:
+            line += f"  {extra}"
+        if style:
+            console.print(f"[{style}]{line}[/{style}]")
+        else:
+            console.print(line)
+
+    lines = config.log_file.read_text().splitlines()
+    matching = []
+    for raw_line in lines:
+        if not raw_line.strip():
+            continue
+        try:
+            entry = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        if _matches(entry):
+            matching.append(entry)
+
+    for entry in matching[-n:]:
+        _print_entry(entry)
+
+    if follow:
+        import time
+        last_size = config.log_file.stat().st_size
+        try:
+            while True:
+                time.sleep(1)
+                current_size = config.log_file.stat().st_size
+                if current_size > last_size:
+                    with open(config.log_file) as f:
+                        f.seek(last_size)
+                        new_data = f.read()
+                    last_size = current_size
+                    for raw_line in new_data.splitlines():
+                        if not raw_line.strip():
+                            continue
+                        try:
+                            entry = json.loads(raw_line)
+                        except json.JSONDecodeError:
+                            continue
+                        if _matches(entry):
+                            _print_entry(entry)
+        except KeyboardInterrupt:
+            pass
 
 
 @app.command
