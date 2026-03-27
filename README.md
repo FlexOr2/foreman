@@ -2,6 +2,6 @@
 
 AI agent orchestrator for multi-plan codebase execution. Reviews plans, determines execution order, spawns parallel Claude Code agents, coordinates file ownership, runs self-review, and commits results.
 
-> **Status: Phase 2 complete** — core orchestration + self-review loop implemented. Brain-driven merge resolution (Phase 3) next.
+> **Status: Phase 3 complete** — core orchestration, self-review loop, and brain-driven merge conflict resolution implemented.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.

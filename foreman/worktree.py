@@ -79,6 +79,26 @@ async def merge_branch(branch: str, repo_root: Path) -> tuple[bool, str]:
     return rc == 0, stderr if rc != 0 else stdout
 
 
+async def get_conflict_files(repo_root: Path) -> list[str]:
+    rc, stdout, _ = await _run_git("diff", "--name-only", "--diff-filter=U", cwd=repo_root)
+    if rc != 0:
+        return []
+    return [f.strip() for f in stdout.strip().splitlines() if f.strip()]
+
+
+async def get_merge_diff(repo_root: Path) -> str:
+    _, stdout, _ = await _run_git("diff", cwd=repo_root)
+    return stdout
+
+
+async def complete_merge(repo_root: Path, message: str) -> tuple[bool, str]:
+    rc_add, _, stderr_add = await _run_git("add", "-A", cwd=repo_root)
+    if rc_add != 0:
+        return False, stderr_add
+    rc, stdout, stderr = await _run_git("commit", "--no-edit", "-m", message, cwd=repo_root)
+    return rc == 0, stderr if rc != 0 else stdout
+
+
 async def abort_merge(repo_root: Path) -> None:
     await _run_git("merge", "--abort", cwd=repo_root)
 

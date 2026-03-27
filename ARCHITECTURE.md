@@ -544,10 +544,10 @@ Built with **cyclopts**.
 - [x] Review slot management (`max_parallel_reviews` enforced separately from workers)
 - [x] ReviewVerdict enum for verdict parsing
 
-### Phase 3: Intelligent Merge
-- [ ] Brain reads diffs + plans for conflict resolution
-- [ ] First-finished-first-merged ordering
-- [ ] Escalation to user for complex conflicts
+### Phase 3: Intelligent Merge ✓
+- [x] Brain reads diffs + plans for conflict resolution
+- [x] First-finished-first-merged ordering (inherent — first done triggers merge)
+- [x] Escalation to user for complex conflicts (BLOCKED + reason)
 
 ### Phase 4: VS Code Extension (foreman-vscode)
 - [ ] TypeScript extension with IPC server (Unix socket)

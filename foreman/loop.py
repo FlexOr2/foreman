@@ -17,7 +17,10 @@ from foreman.monitor import StuckDetector, watch_done, watch_logs, watch_plans
 from foreman.plan_parser import Plan, load_plans
 from foreman.resolver import CircularDependencyError, get_ready_plans, validate_dag
 from foreman.spawner import AGENT_TYPE_SEP, Spawner, _log_filename
-from foreman.worktree import abort_merge, create_worktree, merge_branch, remove_worktree
+from foreman.worktree import (
+    abort_merge, complete_merge, create_worktree, get_conflict_files,
+    get_merge_diff, merge_branch, remove_worktree,
+)
 
 log = logging.getLogger(__name__)
 
@@ -390,16 +393,81 @@ class ForemanLoop:
         success, output = await merge_branch(branch, self.config.repo_root)
 
         if success:
-            log.info("Merged %s successfully", branch)
-            self.db.set_plan_status(plan_name, PlanStatus.DONE)
-            await remove_worktree(plan_name, self.config)
+            await self._finalize_merge(plan_name)
+            return
+
+        log.warning("Merge conflict for %s, invoking brain", plan_name)
+        resolved = await self._brain_resolve_conflict(plan_name, branch)
+
+        if resolved:
+            await self._finalize_merge(plan_name)
         else:
-            log.warning("Merge conflict for %s: %s", plan_name, output)
             await abort_merge(self.config.repo_root)
             self.db.set_plan_status(
                 plan_name, PlanStatus.BLOCKED,
                 reason=f"Merge conflict: {output[:200]}",
             )
+
+    async def _finalize_merge(self, plan_name: str) -> None:
+        log.info("Merged %s successfully", plan_name)
+        self.db.set_plan_status(plan_name, PlanStatus.DONE)
+        await remove_worktree(plan_name, self.config)
+
+    async def _brain_resolve_conflict(self, plan_name: str, branch: str) -> bool:
+        conflict_files = await get_conflict_files(self.config.repo_root)
+        if not conflict_files:
+            return False
+
+        diff = await get_merge_diff(self.config.repo_root)
+
+        plan = self._plans.get(plan_name)
+        plan_context = ""
+        if plan:
+            try:
+                plan_context = plan.file_path.read_text()
+            except FileNotFoundError:
+                pass
+
+        prompt = (
+            f"A merge conflict occurred merging branch '{branch}' into main.\n\n"
+            f"Conflicting files: {', '.join(conflict_files)}\n\n"
+            f"Diff with conflict markers:\n```\n{diff[:8000]}\n```\n\n"
+        )
+        if plan_context:
+            prompt += f"Original plan:\n```\n{plan_context[:4000]}\n```\n\n"
+        prompt += (
+            "Resolve the conflicts in the listed files. "
+            "Edit each file to remove all conflict markers (<<<<<<, =======, >>>>>>>) "
+            "and produce the correct merged result. "
+            "If the conflict is too complex or ambiguous to resolve safely, "
+            "respond with exactly: CANNOT_RESOLVE"
+        )
+
+        try:
+            response = await self.brain.think(prompt)
+        except Exception:
+            log.error("Brain failed during conflict resolution for %s", plan_name, exc_info=True)
+            return False
+
+        if "CANNOT_RESOLVE" in response:
+            log.warning("Brain cannot resolve conflict for %s", plan_name)
+            return False
+
+        remaining = await get_conflict_files(self.config.repo_root)
+        if remaining:
+            log.warning("Brain left unresolved conflicts in: %s", remaining)
+            return False
+
+        success, output = await complete_merge(
+            self.config.repo_root,
+            f"Merge branch '{branch}' (conflict resolved by Foreman brain)",
+        )
+        if not success:
+            log.error("Failed to complete merge after resolution: %s", output)
+            return False
+
+        log.info("Brain resolved merge conflict for %s", plan_name)
+        return True
 
     async def _on_agent_stuck(self, plan_name: str) -> None:
         log.warning("Agent %s is stuck — surfacing in dashboard", plan_name)
