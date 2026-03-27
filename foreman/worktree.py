@@ -106,6 +106,13 @@ async def abort_merge(repo_root: Path) -> None:
     await _run_git("merge", "--abort", cwd=repo_root)
 
 
+async def merge_touched_self(repo_root: Path) -> bool:
+    rc, stdout, _ = await _run_git("diff", "--name-only", "HEAD~1", "HEAD", cwd=repo_root)
+    if rc != 0:
+        return False
+    return any(line.strip().startswith("foreman/") for line in stdout.splitlines())
+
+
 async def list_worktrees(config: Config) -> list[WorktreeInfo]:
     if not config.worktree_dir.exists():
         return []

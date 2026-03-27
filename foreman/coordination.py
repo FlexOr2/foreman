@@ -153,6 +153,13 @@ class CoordinationDB:
         ).fetchall()
         return {r["plan"] for r in rows}
 
+    def get_active_plan_names(self) -> set[str]:
+        rows = self._conn.execute(
+            "SELECT plan FROM plans WHERE status IN (?, ?)",
+            (PlanStatus.RUNNING, PlanStatus.REVIEWING),
+        ).fetchall()
+        return {r["plan"] for r in rows}
+
     def mark_all_running_as_interrupted(self) -> int:
         with self.tx():
             cursor = self._conn.execute(

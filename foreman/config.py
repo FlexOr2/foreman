@@ -73,6 +73,8 @@ class Config:
         AgentType.REVIEW: "Read,Glob,Grep,Bash,Write",
     })
 
+    auto_restart: bool = True
+
     plan_overrides: dict[str, dict] = field(default_factory=dict)
 
     repo_root: Path = field(default_factory=lambda: Path.cwd())
@@ -114,10 +116,10 @@ def load_config(repo_root: Path | None = None) -> Config:
         foreman = raw.get("foreman", {})
 
         for key in ("plans_dir", "prompts_dir", "coordination_db", "log_dir",
-                     "worktree_dir", "scripts_dir", "branch_prefix"):
+                     "worktree_dir", "scripts_dir", "branch_prefix", "auto_restart"):
             if key in foreman:
                 value = foreman[key]
-                if key != "branch_prefix":
+                if key not in ("branch_prefix", "auto_restart"):
                     value = Path(value)
                 setattr(config, key, value)
 
