@@ -197,7 +197,7 @@ class Spawner:
     async def teardown(self) -> None:
         await self.backend.teardown()
 
-    def _terminal_name(self, plan_name: str, agent_type: AgentType) -> str:
+    def terminal_name(self, plan_name: str, agent_type: AgentType) -> str:
         return f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}"
 
     async def spawn_agent(
@@ -218,7 +218,7 @@ class Spawner:
         log_file = self.config.log_dir / _log_filename(plan.name, agent_type)
         log_file.touch()
 
-        terminal = self._terminal_name(plan.name, agent_type)
+        terminal = self.terminal_name(plan.name, agent_type)
         await self.backend.kill_terminal(terminal)
         await self.backend.create_terminal(
             name=terminal,
@@ -232,6 +232,8 @@ class Spawner:
         await self._wait_for_ready(terminal)
         await self.backend.send_text(terminal, initial_message)
         log.info("Sent initial message to %s agent for %s", agent_type.value, plan.name)
+
+        await self._confirm_paste_if_needed(terminal)
         return pid
 
     async def _wait_for_ready(self, terminal: str, timeout: int = 60) -> None:
@@ -253,8 +255,18 @@ class Spawner:
             return None
         return stdout.decode()
 
+    async def _confirm_paste_if_needed(self, terminal: str) -> None:
+        await asyncio.sleep(2)
+        content = await self._capture_pane(terminal)
+        if content and "[Pasted text" in content:
+            log.info("Paste confirmation detected in %s, sending Enter", terminal)
+            proc = await asyncio.create_subprocess_exec(
+                "tmux", "send-keys", "-t", f"{TMUX_SESSION}:{terminal}", "Enter",
+            )
+            await proc.wait()
+
     async def notify_agent(self, plan_name: str, agent_type: AgentType, message: str) -> None:
-        await self.backend.send_text(self._terminal_name(plan_name, agent_type), message)
+        await self.backend.send_text(self.terminal_name(plan_name, agent_type), message)
 
     async def kill_agent(self, plan_name: str, agent_type: AgentType) -> None:
-        await self.backend.kill_terminal(self._terminal_name(plan_name, agent_type))
+        await self.backend.kill_terminal(self.terminal_name(plan_name, agent_type))
