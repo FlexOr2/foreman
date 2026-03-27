@@ -10,43 +10,43 @@ sudo apt install tmux git           # Ubuntu/Debian
 # sudo pacman -S tmux git           # Arch
 # brew install tmux git             # macOS
 
-# Foreman
-uv pip install -e .
+# Foreman (creates venv, installs deps, all automatic)
+uv run foreman --help
 ```
 
-Claude Code CLI is auto-discovered from the VS Code extension, `~/.claude/local/`, or PATH.
+All `foreman` commands are run via `uv run foreman <command>`. Claude Code CLI is auto-discovered from the VS Code extension, `~/.claude/local/`, or PATH.
 
 ## Quickstart
 
 ```bash
 cd your-repo
-foreman init              # Creates plans/, .foreman/ (prompts, config)
+uv run foreman init       # Creates plans/, .foreman/ (prompts, config)
 
 cat > plans/add-logging.md << 'EOF'
 # Add Logging
 Add structured logging to all API endpoints.
 EOF
 
-foreman plan              # Dry run — shows execution order
-foreman start             # Spawns agents, shows live dashboard
+uv run foreman plan       # Dry run — shows execution order
+uv run foreman start      # Spawns agents, shows live dashboard
 ```
 
 Watch agents: `tmux attach -t foreman`
 
 ## Commands
 
-```
-foreman init                    # Set up repo for Foreman
-foreman start                   # Event loop + live dashboard
-foreman plan                    # Dry run — show execution order
-foreman status                  # One-shot status table
+```bash
+uv run foreman init                    # Set up repo for Foreman
+uv run foreman start                   # Event loop + live dashboard
+uv run foreman plan                    # Dry run — show execution order
+uv run foreman status                  # One-shot status table
 
-foreman pause <plan>            # Pause agent, keep worktree
-foreman resume <plan>           # Resume in existing worktree
-foreman guide <plan> "message"  # Send guidance to running agent
+uv run foreman pause <plan>            # Pause agent, keep worktree
+uv run foreman resume <plan>           # Resume in existing worktree
+uv run foreman guide <plan> "message"  # Send guidance to running agent
 
-foreman kill <plan>             # Hard kill agent
-foreman reset                   # Clean up everything
+uv run foreman kill <plan>             # Hard kill agent
+uv run foreman reset                   # Clean up everything
 ```
 
 ## Configuration
