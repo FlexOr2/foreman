@@ -240,13 +240,6 @@ class ForemanLoop:
 
         worktree_path, branch = await create_worktree(plan.name, self.config)
 
-        self.db.upsert_plan(
-            plan.name,
-            PlanStatus.RUNNING,
-            branch=branch,
-            worktree_path=str(worktree_path),
-        )
-
         plan_file = plan.file_path.resolve()
         initial_message = (
             f"Read and implement the plan at {plan_file}. "
@@ -258,11 +251,18 @@ class ForemanLoop:
             plan, worktree_path, AgentType.IMPLEMENTATION, initial_message,
         )
 
-        self.db.add_agent(
-            plan.name, AgentType.IMPLEMENTATION,
-            pid=pid,
-            log_file=str(self.config.log_dir / _log_filename(plan.name, AgentType.IMPLEMENTATION)),
-        )
+        with self.db.tx():
+            self.db.upsert_plan(
+                plan.name,
+                PlanStatus.RUNNING,
+                branch=branch,
+                worktree_path=str(worktree_path),
+            )
+            self.db.add_agent(
+                plan.name, AgentType.IMPLEMENTATION,
+                pid=pid,
+                log_file=str(self.config.log_dir / _log_filename(plan.name, AgentType.IMPLEMENTATION)),
+            )
 
         self.stuck.track(plan.name)
 
@@ -284,8 +284,6 @@ class ForemanLoop:
         await self.spawner.kill_agent(plan_name, AgentType.IMPLEMENTATION)
         await self.spawner.kill_agent(plan_name, AgentType.FIX)
 
-        self.db.set_plan_status(plan_name, PlanStatus.REVIEWING)
-
         worktree_path = Path(plan_data["worktree_path"])
         plan_file = plan.file_path.resolve()
         initial_message = (
@@ -297,11 +295,13 @@ class ForemanLoop:
             plan, worktree_path, AgentType.REVIEW, initial_message,
         )
 
-        self.db.add_agent(
-            plan_name, AgentType.REVIEW,
-            pid=pid,
-            log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.REVIEW)),
-        )
+        with self.db.tx():
+            self.db.set_plan_status(plan_name, PlanStatus.REVIEWING)
+            self.db.add_agent(
+                plan_name, AgentType.REVIEW,
+                pid=pid,
+                log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.REVIEW)),
+            )
 
         self.stuck.track(plan_name)
         log.info("Spawned review agent for %s", plan_name)
@@ -372,8 +372,6 @@ class ForemanLoop:
 
         await self.spawner.kill_agent(plan_name, AgentType.REVIEW)
 
-        self.db.set_plan_status(plan_name, PlanStatus.RUNNING)
-
         worktree_path = Path(plan_data["worktree_path"])
         plan_file = plan.file_path.resolve()
         initial_message = (
@@ -386,11 +384,13 @@ class ForemanLoop:
             plan, worktree_path, AgentType.FIX, initial_message,
         )
 
-        self.db.add_agent(
-            plan_name, AgentType.FIX,
-            pid=pid,
-            log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.FIX)),
-        )
+        with self.db.tx():
+            self.db.set_plan_status(plan_name, PlanStatus.RUNNING)
+            self.db.add_agent(
+                plan_name, AgentType.FIX,
+                pid=pid,
+                log_file=str(self.config.log_dir / _log_filename(plan_name, AgentType.FIX)),
+            )
 
         self.stuck.track(plan_name)
         log.info("Spawned fix agent for %s", plan_name)

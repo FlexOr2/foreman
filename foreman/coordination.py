@@ -70,20 +70,26 @@ class CoordinationDB:
         self._conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._in_tx = False
 
     def close(self) -> None:
         self._conn.close()
 
     @contextmanager
-    def _tx(self) -> Iterator[sqlite3.Connection]:
+    def tx(self) -> Iterator[None]:
+        if self._in_tx:
+            yield
+            return
         self._conn.execute("BEGIN IMMEDIATE")
+        self._in_tx = True
         try:
-            yield self._conn
+            yield
             self._conn.execute("COMMIT")
         except Exception:
             self._conn.execute("ROLLBACK")
             raise
-
+        finally:
+            self._in_tx = False
 
     def upsert_plan(
         self,
@@ -92,25 +98,27 @@ class CoordinationDB:
         branch: str | None = None,
         worktree_path: str | None = None,
     ) -> None:
-        now = _now()
-        self._conn.execute(
-            """INSERT INTO plans (plan, status, branch, worktree_path, started_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(plan) DO UPDATE SET
-                 status=excluded.status,
-                 branch=COALESCE(excluded.branch, plans.branch),
-                 worktree_path=COALESCE(excluded.worktree_path, plans.worktree_path),
-                 updated_at=excluded.updated_at""",
-            (plan, status, branch, worktree_path, now, now),
-        )
+        with self.tx():
+            now = _now()
+            self._conn.execute(
+                """INSERT INTO plans (plan, status, branch, worktree_path, started_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(plan) DO UPDATE SET
+                     status=excluded.status,
+                     branch=COALESCE(excluded.branch, plans.branch),
+                     worktree_path=COALESCE(excluded.worktree_path, plans.worktree_path),
+                     updated_at=excluded.updated_at""",
+                (plan, status, branch, worktree_path, now, now),
+            )
 
     def set_plan_status(
         self, plan: str, status: PlanStatus, reason: str | None = None
     ) -> None:
-        self._conn.execute(
-            "UPDATE plans SET status=?, blocked_reason=?, updated_at=? WHERE plan=?",
-            (status, reason, _now(), plan),
-        )
+        with self.tx():
+            self._conn.execute(
+                "UPDATE plans SET status=?, blocked_reason=?, updated_at=? WHERE plan=?",
+                (status, reason, _now(), plan),
+            )
 
     def get_plan_status(self, plan: str) -> PlanStatus | None:
         row = self._conn.execute(
@@ -146,13 +154,12 @@ class CoordinationDB:
         return {r["plan"] for r in rows}
 
     def mark_all_running_as_interrupted(self) -> int:
-        with self._tx() as conn:
-            cursor = conn.execute(
+        with self.tx():
+            cursor = self._conn.execute(
                 "UPDATE plans SET status=?, updated_at=? WHERE status IN (?, ?)",
                 (PlanStatus.INTERRUPTED, _now(), PlanStatus.RUNNING, PlanStatus.REVIEWING),
             )
             return cursor.rowcount
-
 
     def add_agent(
         self,
@@ -161,21 +168,24 @@ class CoordinationDB:
         pid: int | None = None,
         log_file: str | None = None,
     ) -> int:
-        cursor = self._conn.execute(
-            """INSERT INTO agents (plan, type, pid, log_file, started_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (plan, agent_type, pid, log_file, _now()),
-        )
-        return cursor.lastrowid  # type: ignore[return-value]
+        with self.tx():
+            cursor = self._conn.execute(
+                """INSERT INTO agents (plan, type, pid, log_file, started_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (plan, agent_type, pid, log_file, _now()),
+            )
+            return cursor.lastrowid  # type: ignore[return-value]
 
     def update_agent_pid(self, agent_id: int, pid: int) -> None:
-        self._conn.execute("UPDATE agents SET pid=? WHERE id=?", (pid, agent_id))
+        with self.tx():
+            self._conn.execute("UPDATE agents SET pid=? WHERE id=?", (pid, agent_id))
 
     def finish_agent(self, agent_id: int, exit_code: int) -> None:
-        self._conn.execute(
-            "UPDATE agents SET finished_at=?, exit_code=? WHERE id=?",
-            (_now(), exit_code, agent_id),
-        )
+        with self.tx():
+            self._conn.execute(
+                "UPDATE agents SET finished_at=?, exit_code=? WHERE id=?",
+                (_now(), exit_code, agent_id),
+            )
 
     def get_active_agents(self) -> list[dict]:
         rows = self._conn.execute(
