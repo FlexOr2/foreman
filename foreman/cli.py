@@ -351,7 +351,8 @@ def analyze(
         console.print("  Web search: enabled")
 
     if dry_run:
-        console.print(f"\n[dim]Dry run — would analyze {config.plans_dir} and generate draft plans.[/dim]")
+        target = path or config.repo_root
+        console.print(f"\n[dim]Dry run — would analyze {target} and generate draft plans.[/dim]")
         return
 
     drafts = asyncio.run(run_analysis(config, focus, web=web, scope_path=path))

@@ -84,10 +84,15 @@ def _build_prompt(focus: str, analyze_config: AnalyzeConfig, scope_path: str | N
             "latest package versions, and current best practices.\n"
         )
 
+    include = ", ".join(analyze_config.include_patterns)
+    exclude = ", ".join(analyze_config.exclude_patterns)
+
     return f"""\
 You are analyzing a codebase for improvements.
 
 Focus area: {focus_desc}
+File types to analyze: {include}
+Directories/patterns to skip: {exclude}
 {scope_instruction}{web_instruction}
 Instructions:
 - Explore the codebase structure and read key files to understand the project
