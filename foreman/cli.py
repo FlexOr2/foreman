@@ -306,7 +306,13 @@ def logs(
         try:
             while True:
                 time.sleep(1)
-                current_size = config.log_file.stat().st_size
+                try:
+                    current_size = config.log_file.stat().st_size
+                except FileNotFoundError:
+                    last_size = 0
+                    continue
+                if current_size < last_size:
+                    last_size = 0
                 if current_size > last_size:
                     with open(config.log_file) as f:
                         f.seek(last_size)
