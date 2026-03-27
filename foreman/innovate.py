@@ -527,7 +527,10 @@ async def review_existing_drafts(
         permission_mode=config.agents.permission_mode,
     )
 
-    draft_files = sorted(config.plans_dir.glob("draft-*.md"))
+    draft_files = sorted(
+        f for f in config.plans_dir.glob("*.md")
+        if INNOVATOR_MARKER in f.read_text(encoding="utf-8")[:100]
+    )
     if not draft_files:
         return [], []
 
