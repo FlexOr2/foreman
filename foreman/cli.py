@@ -16,6 +16,7 @@ from rich.table import Table
 
 from foreman.config import RESTART_EXIT_CODE, load_config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
+from foreman.dashboard import STATUS_STYLES
 from foreman.loop import ForemanLoop
 from foreman.plan_parser import InvalidPlanNameError, load_plans
 from foreman.preflight import check_git_repo, check_prerequisites
@@ -68,17 +69,6 @@ def _setup_logging(debug: bool = False, log_file: Path | None = None) -> None:
         handler.setLevel(level)
         handler.setFormatter(_JSONFormatter())
         logging.getLogger().addHandler(handler)
-
-
-STATUS_STYLES = {
-    "QUEUED": "white",
-    "RUNNING": "cyan",
-    "REVIEWING": "blue",
-    "DONE": "green",
-    "BLOCKED": "yellow",
-    "FAILED": "red",
-    "INTERRUPTED": "magenta",
-}
 
 
 @app.command
@@ -243,7 +233,11 @@ def status(repo: Path = Path(".")) -> None:
 
     for plan_data in db.get_all_plans():
         status_str = plan_data["status"]
-        style = STATUS_STYLES.get(status_str, "white")
+        try:
+            style = STATUS_STYLES[PlanStatus(status_str)]
+        except (ValueError, KeyError):
+            log.warning("Unknown plan status from DB: %s", status_str)
+            style = "white"
         table.add_row(
             plan_data["plan"],
             f"[{style}]{status_str}[/{style}]",
