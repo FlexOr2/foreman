@@ -23,7 +23,7 @@ def _read_file_or_none(path: Path) -> str | None:
 
 
 class ForemanBrain:
-    def __init__(self, foreman_dir: Path, allowed_tools: str, permission_mode: str, timeout: int = 300) -> None:
+    def __init__(self, foreman_dir: Path, allowed_tools: str, permission_mode: str, timeout: int = 900) -> None:
         self._session_file = foreman_dir / "session_id"
         self._context_file = foreman_dir / "context.md"
         self._allowed_tools = allowed_tools
