@@ -10,6 +10,7 @@ from pathlib import Path
 
 from asyncinotify import Mask
 
+from foreman.analyzer import run_analysis
 from foreman.brain import ForemanBrain
 from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict
@@ -61,6 +62,7 @@ class ForemanLoop:
                 tg.create_task(self._log_watcher())
                 tg.create_task(self._done_watcher())
                 tg.create_task(self._scheduler())
+                tg.create_task(self._analyzer_loop())
                 tg.create_task(run_dashboard(self.config, self.db, self._shutdown))
                 tg.create_task(self._shutdown_waiter())
         except* KeyboardInterrupt:
@@ -479,6 +481,35 @@ class ForemanLoop:
 
         log.info("Brain resolved merge conflict for %s", plan_name)
         return True
+
+    # --- Analyzers ---
+
+    def _count_drafts(self) -> int:
+        return sum(1 for _ in self.config.plans_dir.glob("draft-*.md"))
+
+    async def _analyzer_loop(self) -> None:
+        if not self.config.analyzers.enabled:
+            return
+
+        while not self._shutdown.is_set():
+            if self._count_drafts() < self.config.analyzers.max_drafts:
+                for focus in self.config.analyzers.effective_focus():
+                    if self._shutdown.is_set():
+                        break
+                    if self._count_drafts() >= self.config.analyzers.max_drafts:
+                        break
+                    drafts = await run_analysis(focus, self.config, self.brain)
+                    if drafts:
+                        await self._scan_plans()
+                        self._schedule_event.set()
+
+            await self._wait_for_interval(self.config.analyzers.interval)
+
+    async def _wait_for_interval(self, seconds: int) -> None:
+        try:
+            await asyncio.wait_for(self._shutdown.wait(), timeout=seconds)
+        except asyncio.TimeoutError:
+            pass
 
     async def _on_agent_stuck(self, plan_name: str) -> None:
         log.warning("Agent %s is stuck — surfacing in dashboard", plan_name)
