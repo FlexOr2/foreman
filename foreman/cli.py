@@ -437,6 +437,25 @@ def resume(plan_name: str, repo: Path = Path(".")) -> None:
 
 
 @app.command
+def unblock(plan_name: str, repo: Path = Path(".")) -> None:
+    """Re-queue a BLOCKED or FAILED plan so the scheduler picks it up again."""
+    _setup_logging()
+    config = load_config(repo.resolve())
+    db = CoordinationDB(config.coordination_db)
+    status = db.get_plan_status(plan_name)
+    if status not in (PlanStatus.BLOCKED, PlanStatus.FAILED):
+        console.print(f"[yellow]Plan {plan_name} is not blocked or failed[/yellow] (status: {status})")
+        db.close()
+        return
+    previous_reason = db.get_plan(plan_name).get("blocked_reason", "")
+    db.set_plan_status(plan_name, PlanStatus.QUEUED)
+    db.close()
+    log.info("Unblocked plan %s (was %s: %s)", plan_name, status, previous_reason or "no reason recorded")
+    console.print(f"Re-queued [bold]{plan_name}[/bold] (was {status}: {previous_reason or 'no reason'})")
+    console.print("Will be picked up on next scheduler cycle.")
+
+
+@app.command
 def guide(plan_name: str, message: str, repo: Path = Path(".")) -> None:
     """Send guidance to a running agent."""
     _setup_logging()
