@@ -22,10 +22,13 @@ class StuckDetector:
         self,
         threshold_seconds: int,
         on_stuck: Callable[[str, str | None], Coroutine],
+        on_timeout: Callable[[str, str | None], Coroutine] | None = None,
     ) -> None:
         self.threshold = threshold_seconds
         self._on_stuck = on_stuck
+        self._on_timeout = on_timeout
         self._timers: dict[str, asyncio.TimerHandle] = {}
+        self._timeout_timers: dict[str, asyncio.TimerHandle] = {}
         self._active_plans: set[str] = set()
         self._terminals: dict[str, str] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -58,17 +61,40 @@ class StuckDetector:
         terminal = self._terminals.get(plan_name)
         self._get_loop().create_task(self._on_stuck(plan_name, terminal))
 
+    def track_timeout(self, plan_name: str, terminal: str, timeout_seconds: int) -> None:
+        if plan_name in self._timeout_timers:
+            self._timeout_timers[plan_name].cancel()
+        loop = self._get_loop()
+        self._timeout_timers[plan_name] = loop.call_later(
+            timeout_seconds, self._fire_timeout, plan_name,
+        )
+
+    def _fire_timeout(self, plan_name: str) -> None:
+        if plan_name not in self._active_plans:
+            return
+        if not self._on_timeout:
+            return
+        log.warning("Agent %s hit hard timeout", plan_name)
+        terminal = self._terminals.get(plan_name)
+        self._get_loop().create_task(self._on_timeout(plan_name, terminal))
+
     def cancel(self, plan_name: str) -> None:
         self._active_plans.discard(plan_name)
         self._terminals.pop(plan_name, None)
         timer = self._timers.pop(plan_name, None)
         if timer:
             timer.cancel()
+        timeout_timer = self._timeout_timers.pop(plan_name, None)
+        if timeout_timer:
+            timeout_timer.cancel()
 
     def cancel_all(self) -> None:
         for timer in self._timers.values():
             timer.cancel()
         self._timers.clear()
+        for timer in self._timeout_timers.values():
+            timer.cancel()
+        self._timeout_timers.clear()
         self._active_plans.clear()
         self._terminals.clear()
 
