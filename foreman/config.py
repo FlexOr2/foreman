@@ -33,36 +33,6 @@ class AgentConfig:
     permission_mode: str = "dontAsk"
 
 
-DEFAULT_ANALYZER_PROMPT = (
-    "Analyze the codebase for improvements: bugs, security issues, performance problems, "
-    "code quality, and technical debt. Focus on actionable, concrete changes."
-)
-
-
-@dataclass
-class AnalyzerFocus:
-    name: str
-    prompt: str
-
-
-@dataclass
-class AnalyzerConfig:
-    enabled: bool = False
-    max_drafts: int = 5
-    interval: int = 300
-    focus: list[AnalyzerFocus] = field(default_factory=list)
-
-    def effective_focus(self) -> list[AnalyzerFocus]:
-        return self.focus or [AnalyzerFocus(name="general", prompt=DEFAULT_ANALYZER_PROMPT)]
-
-
-@dataclass
-class AnalyzeConfig:
-    max_plans: int = 10
-    include_patterns: list[str] = field(default_factory=lambda: ["*.py", "*.ts", "*.js", "*.go", "*.rs", "*.java"])
-    exclude_patterns: list[str] = field(default_factory=lambda: [".venv", "node_modules", "dist", "__pycache__", ".git"])
-
-
 ALL_IDEA_CATEGORIES = [
     "risk", "performance", "architecture", "debt", "dx",
     "features", "competitive", "delight", "moonshots",
@@ -71,7 +41,11 @@ ALL_IDEA_CATEGORIES = [
 
 @dataclass
 class InnovateConfig:
+    enabled: bool = False
+    max_drafts: int = 5
+    interval: int = 600
     max_ideas: int = 10
+    skip_review: bool = False
     categories: list[str] = field(default_factory=lambda: list(ALL_IDEA_CATEGORIES))
 
 
@@ -93,8 +67,6 @@ class Config:
 
     timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
     agents: AgentConfig = field(default_factory=AgentConfig)
-    analyze: AnalyzeConfig = field(default_factory=AnalyzeConfig)
-    analyzers: AnalyzerConfig = field(default_factory=AnalyzerConfig)
     innovate: InnovateConfig = field(default_factory=InnovateConfig)
 
     allowed_tools: dict[str, str] = field(default_factory=lambda: {
@@ -162,11 +134,6 @@ def load_config(repo_root: Path | None = None) -> Config:
                 if hasattr(config.agents, key):
                     setattr(config.agents, key, value)
 
-        if "analyze" in foreman:
-            for key, value in foreman["analyze"].items():
-                if hasattr(config.analyze, key):
-                    setattr(config.analyze, key, value)
-
         if "innovate" in foreman:
             for key, value in foreman["innovate"].items():
                 if hasattr(config.innovate, key):
@@ -174,17 +141,6 @@ def load_config(repo_root: Path | None = None) -> Config:
 
         if "allowed_tools" in foreman:
             config.allowed_tools.update(foreman["allowed_tools"])
-
-        if "analyzers" in foreman:
-            analyzers_raw = foreman["analyzers"]
-            for key in ("enabled", "max_drafts", "interval"):
-                if key in analyzers_raw:
-                    setattr(config.analyzers, key, analyzers_raw[key])
-            if "focus" in analyzers_raw:
-                config.analyzers.focus = [
-                    AnalyzerFocus(name=f["name"], prompt=f["prompt"])
-                    for f in analyzers_raw["focus"]
-                ]
 
         if "plans" in foreman:
             for plan_name, overrides in foreman["plans"].items():

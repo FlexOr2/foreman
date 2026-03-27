@@ -45,13 +45,13 @@ def _time_ago(iso_str: str | None) -> str:
         return ""
 
 
-def _analyzer_status(config: Config) -> str:
-    if not config.analyzers.enabled:
+def _innovator_status(config: Config) -> str:
+    if not config.innovate.enabled:
         return "disabled"
     draft_count = sum(1 for _ in config.plans_dir.glob("draft-*.md"))
-    if draft_count >= config.analyzers.max_drafts:
-        return f"paused ({draft_count}/{config.analyzers.max_drafts} drafts)"
-    return f"analyzing ({draft_count}/{config.analyzers.max_drafts} drafts)"
+    if draft_count >= config.innovate.max_drafts:
+        return f"paused ({draft_count}/{config.innovate.max_drafts} drafts)"
+    return f"running ({draft_count}/{config.innovate.max_drafts} drafts)"
 
 
 def _build_slots_panel(config: Config, db: CoordinationDB) -> Panel:
@@ -63,11 +63,11 @@ def _build_slots_panel(config: Config, db: CoordinationDB) -> Panel:
     worker_text.append("  ")
     worker_text.append(f" Reviews: {reviewing}/{config.agents.max_parallel_reviews} ", style="blue")
 
-    if config.analyzers.enabled:
-        status = _analyzer_status(config)
+    if config.innovate.enabled:
+        status = _innovator_status(config)
         style = "yellow" if "paused" in status else "green"
         worker_text.append("  ")
-        worker_text.append(f" Analyzers: {status} ", style=style)
+        worker_text.append(f" Innovator: {status} ", style=style)
 
     return Panel(worker_text, title="Slots", border_style="dim")
 

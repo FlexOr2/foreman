@@ -10,8 +10,8 @@ from pathlib import Path
 
 from asyncinotify import Mask
 
-from foreman.analyzer import run_analysis
 from foreman.brain import ForemanBrain
+from foreman.innovate import innovate
 from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict
 from foreman.dashboard import run_dashboard
@@ -62,7 +62,7 @@ class ForemanLoop:
                 tg.create_task(self._log_watcher())
                 tg.create_task(self._done_watcher())
                 tg.create_task(self._scheduler())
-                tg.create_task(self._analyzer_loop())
+                tg.create_task(self._innovator_loop())
                 tg.create_task(run_dashboard(self.config, self.db, self._shutdown))
                 tg.create_task(self._shutdown_waiter())
         except* KeyboardInterrupt:
@@ -482,26 +482,23 @@ class ForemanLoop:
         log.info("Brain resolved merge conflict for %s", plan_name)
         return True
 
-    # --- Analyzers ---
+    # --- Background innovation ---
 
     def _count_drafts(self) -> int:
         return sum(1 for _ in self.config.plans_dir.glob("draft-*.md"))
 
-    async def _analyzer_loop(self) -> None:
-        if not self.config.analyzers.enabled:
+    async def _innovator_loop(self) -> None:
+        if not self.config.innovate.enabled:
             return
 
         while not self._shutdown.is_set():
-            if self._count_drafts() < self.config.analyzers.max_drafts:
-                for focus in self.config.analyzers.effective_focus():
-                    if self._shutdown.is_set():
-                        break
-                    if self._count_drafts() >= self.config.analyzers.max_drafts:
-                        break
-                    completed = self.db.get_completed_plan_names()
-                    await run_analysis(focus, self.config, self.brain, completed)
+            if self._count_drafts() < self.config.innovate.max_drafts:
+                await innovate(
+                    self.config,
+                    skip_review=self.config.innovate.skip_review,
+                )
 
-            await self._wait_for_interval(self.config.analyzers.interval)
+            await self._wait_for_interval(self.config.innovate.interval)
 
     async def _wait_for_interval(self, seconds: int) -> None:
         try:
