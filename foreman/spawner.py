@@ -222,6 +222,7 @@ class Spawner:
         log_file.touch()
 
         terminal = self._terminal_name(plan.name, agent_type)
+        await self.backend.kill_terminal(terminal)
         await self.backend.create_terminal(
             name=terminal,
             command=f"bash {shlex.quote(str(script_path))}",
