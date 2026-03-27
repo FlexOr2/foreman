@@ -57,6 +57,7 @@ class ForemanLoop:
         self._active_agent_ids: dict[str, int] = {}
         self._restart_pending = False
         self._innovator_running = False
+        self._merge_lock = asyncio.Lock()
         self._schedule_event = asyncio.Event()
         self._shutdown = asyncio.Event()
 
@@ -549,31 +550,32 @@ class ForemanLoop:
     # --- Merge ---
 
     async def _merge_plan(self, plan_name: str) -> None:
-        plan_data = self.db.get_plan(plan_name)
-        if not plan_data:
-            return
+        async with self._merge_lock:
+            plan_data = self.db.get_plan(plan_name)
+            if not plan_data:
+                return
 
-        branch = plan_data["branch"]
-        log.info("Merging branch %s for plan %s", branch, plan_name)
+            branch = plan_data["branch"]
+            log.info("Merging branch %s for plan %s", branch, plan_name)
 
-        success, output = await merge_branch(branch, self.config.repo_root)
+            success, output = await merge_branch(branch, self.config.repo_root)
 
-        if success:
-            await self._finalize_merge(plan_name)
-            return
+            if success:
+                await self._finalize_merge(plan_name)
+                return
 
-        log.warning("Merge conflict for %s, invoking brain", plan_name)
-        resolved = await self._brain_resolve_conflict(plan_name, branch)
+            log.warning("Merge conflict for %s, invoking brain", plan_name)
+            resolved = await self._brain_resolve_conflict(plan_name, branch)
 
-        if resolved:
-            await self._finalize_merge(plan_name)
-        else:
-            await abort_merge(self.config.repo_root)
-            self.db.set_plan_status(
-                plan_name, PlanStatus.BLOCKED,
-                reason=f"Merge conflict: {output[:200]}",
-            )
-            self._cascade_failure(plan_name)
+            if resolved:
+                await self._finalize_merge(plan_name)
+            else:
+                await abort_merge(self.config.repo_root)
+                self.db.set_plan_status(
+                    plan_name, PlanStatus.BLOCKED,
+                    reason=f"Merge conflict: {output[:200]}",
+                )
+                self._cascade_failure(plan_name)
 
     async def _finalize_merge(self, plan_name: str) -> None:
         log.info("Merged %s successfully", plan_name)
