@@ -101,6 +101,10 @@ class ForemanLoop:
         self.stuck.cancel_all()
         self.completion.cancel_all()
 
+        for plan_name, agent_id in self._active_agent_ids.items():
+            self.db.finish_agent(agent_id, exit_code=-1)
+        self._active_agent_ids.clear()
+
         count = self.db.mark_all_running_as_interrupted()
         if count:
             log.info("Marked %d plans as INTERRUPTED", count)
