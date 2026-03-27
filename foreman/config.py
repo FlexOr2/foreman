@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
+from enum import StrEnum
 from pathlib import Path
+from typing import get_type_hints
 
 from foreman.coordination import AgentType, StuckAction
 
@@ -109,6 +112,43 @@ class Config:
         return getattr(self.timeouts, agent_type.value, self.timeouts.implementation)
 
 
+log = logging.getLogger(__name__)
+
+KNOWN_TOP_LEVEL_KEYS = {
+    "plans_dir", "prompts_dir", "coordination_db", "log_dir",
+    "log_file", "worktree_dir", "scripts_dir", "branch_prefix",
+    "auto_restart", "prompts", "timeouts", "agents", "innovate",
+    "allowed_tools", "plans",
+}
+
+
+def _apply_section(target: object, section_name: str, data: dict) -> None:
+    known_keys = {f.name for f in fields(target)}
+    for key, value in data.items():
+        if key in known_keys:
+            setattr(target, key, value)
+        else:
+            log.warning("Unknown config key: foreman.%s.%s", section_name, key)
+
+
+def _validate_enum_fields(target: object, section_name: str) -> None:
+    hints = get_type_hints(type(target))
+    for f in fields(target):
+        hint = hints.get(f.name)
+        if isinstance(hint, type) and issubclass(hint, StrEnum):
+            value = getattr(target, f.name)
+            if not isinstance(value, hint):
+                try:
+                    setattr(target, f.name, hint(value))
+                except ValueError:
+                    valid = [e.value for e in hint]
+                    log.warning(
+                        "Invalid value for foreman.%s.%s: %r (valid: %s)",
+                        section_name, f.name, value, ", ".join(valid),
+                    )
+                    setattr(target, f.name, f.default)
+
+
 def load_config(repo_root: Path | None = None) -> Config:
     if repo_root is None:
         repo_root = Path.cwd()
@@ -122,6 +162,10 @@ def load_config(repo_root: Path | None = None) -> Config:
 
         foreman = raw.get("foreman", {})
 
+        for key in foreman:
+            if key not in KNOWN_TOP_LEVEL_KEYS:
+                log.warning("Unknown config key: foreman.%s", key)
+
         for key in ("plans_dir", "prompts_dir", "coordination_db", "log_dir",
                      "log_file", "worktree_dir", "scripts_dir", "branch_prefix", "auto_restart"):
             if key in foreman:
@@ -134,19 +178,14 @@ def load_config(repo_root: Path | None = None) -> Config:
             config.prompts.update(foreman["prompts"])
 
         if "timeouts" in foreman:
-            for key, value in foreman["timeouts"].items():
-                if hasattr(config.timeouts, key):
-                    setattr(config.timeouts, key, value)
+            _apply_section(config.timeouts, "timeouts", foreman["timeouts"])
 
         if "agents" in foreman:
-            for key, value in foreman["agents"].items():
-                if hasattr(config.agents, key):
-                    setattr(config.agents, key, value)
+            _apply_section(config.agents, "agents", foreman["agents"])
+            _validate_enum_fields(config.agents, "agents")
 
         if "innovate" in foreman:
-            for key, value in foreman["innovate"].items():
-                if hasattr(config.innovate, key):
-                    setattr(config.innovate, key, value)
+            _apply_section(config.innovate, "innovate", foreman["innovate"])
 
         if "allowed_tools" in foreman:
             config.allowed_tools.update(foreman["allowed_tools"])
