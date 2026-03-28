@@ -101,6 +101,19 @@ class TestUnresolvedDependencies:
         ]
         validate_dag(plans)
 
+    def test_known_completed_satisfies_dependency(self) -> None:
+        plans = [
+            Plan(name="a", file_path=Path("a.md"), depends_on=["archived"]),
+        ]
+        validate_dag(plans, known_completed={"archived"})
+
+    def test_still_raises_for_truly_unknown_dep(self) -> None:
+        plans = [
+            Plan(name="a", file_path=Path("a.md"), depends_on=["missing"]),
+        ]
+        with pytest.raises(UnresolvedDependencyError):
+            validate_dag(plans, known_completed={"archived"})
+
 
 # --- Module encapsulation ---
 
