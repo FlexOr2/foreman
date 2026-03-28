@@ -90,15 +90,15 @@ class AgentScheduler:
     async def spawn_implementation(self, plan: Plan) -> None:
         log.info("Spawning implementation agent for %s", plan.name)
 
-        resuming = (self.config.worktree_dir / plan.name).exists()
         worktree_path, branch = await create_worktree(plan.name, self.config)
 
         plan_file = plan.file_path.resolve()
-        if resuming:
+        if await branch_has_commits(branch, self.config.repo_root):
             initial_message = (
                 f"You are resuming work on this plan. "
                 f"Read the plan at {plan_file} and review what has already been done on branch {branch}. "
-                f"Continue where the previous agent left off."
+                f"Continue where the previous agent left off. "
+                f"Commit all your changes when done."
             )
         else:
             initial_message = (
