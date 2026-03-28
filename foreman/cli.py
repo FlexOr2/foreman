@@ -603,7 +603,9 @@ def reset(repo: Path = Path(".")) -> None:
         shutil.rmtree(done_dir)
 
     import subprocess
-    subprocess.run(["tmux", "kill-session", "-t", "foreman"], capture_output=True)
-    console.print("Tmux session killed.")
+    result = subprocess.run(["tmux", "kill-session", "-t", "foreman"], capture_output=True)
+    if result.returncode == 0:
+        console.print("Tmux session killed.")
+    log.info("Reset complete")
 
     console.print("[green]Reset complete.[/green]")
