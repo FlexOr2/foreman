@@ -14,7 +14,8 @@ from foreman.spawner import AGENT_TYPE_SEP, Spawner
 
 log = logging.getLogger(__name__)
 
-WATCHDOG_INTERVAL = 30
+WATCHDOG_INTERVAL = 60
+ORPHAN_MIN_AGE_SECONDS = 120
 TIMEOUT_GRACE_PERIOD = 60
 
 
@@ -60,6 +61,17 @@ class AgentWatchdog:
             agent_type = self.db.get_active_agent_type(plan_name)
             if not agent_type:
                 continue
+
+            updated_at = plan_data.get("updated_at", "")
+            if updated_at:
+                from datetime import datetime, timezone
+                try:
+                    ts = datetime.fromisoformat(updated_at)
+                    age = (datetime.now(timezone.utc) - ts).total_seconds()
+                    if age < ORPHAN_MIN_AGE_SECONDS:
+                        continue
+                except (ValueError, TypeError):
+                    pass
 
             terminal = self.spawner.terminal_name(plan_name, agent_type)
             if await self.spawner.has_window(terminal):
