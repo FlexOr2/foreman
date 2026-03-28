@@ -212,6 +212,20 @@ class AgentScheduler:
                     reason="Max review retries exceeded",
                 )
                 self.cascade_failure(plan_name)
+                try:
+                    await remove_worktree(plan_name, self.config)
+                except Exception:
+                    log.warning("Failed to remove worktree for %s", plan_name, exc_info=True)
+                plan = self.plans.get(plan_name)
+                if plan and plan.file_path.exists():
+                    failed_dir = self.config.plans_dir / "failed"
+                    failed_dir.mkdir(exist_ok=True)
+                    dest = failed_dir / plan.file_path.name
+                    dest.write_text(
+                        f"# FAILED: Max review retries exceeded\n\n{plan.file_path.read_text()}"
+                    )
+                    plan.file_path.unlink()
+                    log.info("Moved failed plan %s to %s", plan_name, dest)
             else:
                 issues = verdict.get("issues", [])
                 log.info("Review found %d issues for %s, spawning fix agent", len(issues), plan_name)

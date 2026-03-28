@@ -61,14 +61,17 @@ async def remove_worktree(plan_name: str, config: Config) -> None:
     worktree_path = config.worktree_dir / plan_name
     branch = f"{config.branch_prefix}{plan_name}"
 
-    rc, _, stderr = await _run_git(
-        "worktree", "remove", str(worktree_path), "--force",
-        cwd=config.repo_root,
-    )
-    if rc != 0:
-        log.warning("Failed to remove worktree %s: %s", worktree_path, stderr)
+    if worktree_path.exists():
+        rc, _, stderr = await _run_git(
+            "worktree", "remove", str(worktree_path), "--force",
+            cwd=config.repo_root,
+        )
+        if rc != 0:
+            log.warning("Failed to remove worktree %s: %s", worktree_path, stderr)
+        else:
+            log.info("Removed worktree at %s", worktree_path)
     else:
-        log.info("Removed worktree at %s", worktree_path)
+        log.debug("Worktree %s already gone", worktree_path)
 
     rc, _, stderr = await _run_git("branch", "-D", branch, cwd=config.repo_root)
     if rc != 0:
