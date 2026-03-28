@@ -218,6 +218,9 @@ def _build_launcher_script(
         f"  --add-dir {shlex.quote(str(plans_dir))}",
     ]
 
+    if agent_type in (AgentType.REVIEW, AgentType.FIX):
+        cmd_parts.append("  --bare")
+
     if tools:
         cmd_parts.append(f"  --allowed-tools {shlex.quote(tools)}")
 
