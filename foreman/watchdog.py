@@ -35,6 +35,23 @@ class AgentWatchdog:
         self.on_cascade: Callable[[str], None] | None = None
         self.on_finish_agent: Callable[[str], int | None] | None = None
 
+    async def _kill_stale_agents(self) -> None:
+        for plan_data in self.db.get_all_plans():
+            plan_name = plan_data["plan"]
+            status = plan_data["status"]
+            if status not in (PlanStatus.DONE, PlanStatus.FAILED, PlanStatus.BLOCKED):
+                continue
+            agent_type = self.db.get_active_agent_type(plan_name)
+            if not agent_type:
+                continue
+            if await self.spawner.is_agent_alive(plan_name, agent_type):
+                log.warning("Killing stale agent for %s (plan already %s)", plan_name, status)
+                await self.spawner.kill_agent(plan_name, agent_type)
+                self.stuck.cancel(plan_name)
+                agent_id = self.on_finish_agent(plan_name) if self.on_finish_agent else None
+                if agent_id is not None:
+                    self.db.finish_agent(agent_id, exit_code=-1)
+
     def on_log_activity(self, plan_name: str) -> None:
         if plan_name in self._stuck_warned:
             self._stuck_warned.discard(plan_name)
@@ -51,6 +68,8 @@ class AgentWatchdog:
             await self._reconcile_orphaned_plans(schedule_event)
 
     async def _reconcile_orphaned_plans(self, schedule_event: asyncio.Event) -> None:
+        await self._kill_stale_agents()
+
         running = self.db.get_plans_by_status(PlanStatus.RUNNING) + self.db.get_plans_by_status(PlanStatus.REVIEWING)
         reconciled = False
 
