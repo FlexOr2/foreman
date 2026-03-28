@@ -86,9 +86,11 @@ async def branch_has_commits(branch: str, repo_root: Path) -> int:
     return int(stdout.strip())
 
 
-async def merge_branch(branch: str, repo_root: Path) -> tuple[bool, str]:
+async def merge_branch(branch: str, repo_root: Path) -> tuple[bool, str, str]:
+    rc_head, pre_merge_head, _ = await _run_git("rev-parse", "HEAD", cwd=repo_root)
     rc, stdout, stderr = await _run_git("merge", branch, cwd=repo_root)
-    return rc == 0, stderr if rc != 0 else stdout
+    pre_head = pre_merge_head.strip() if rc_head == 0 else ""
+    return rc == 0, stderr if rc != 0 else stdout, pre_head
 
 
 async def get_conflict_files(repo_root: Path) -> list[str]:
@@ -115,8 +117,10 @@ async def abort_merge(repo_root: Path) -> None:
     await _run_git("merge", "--abort", cwd=repo_root)
 
 
-async def merge_touched_self(repo_root: Path) -> bool:
-    rc, stdout, _ = await _run_git("diff", "--name-only", "HEAD~1", "HEAD", cwd=repo_root)
+async def merge_touched_self(repo_root: Path, pre_merge_ref: str) -> bool:
+    if not pre_merge_ref:
+        return False
+    rc, stdout, _ = await _run_git("diff", "--name-only", pre_merge_ref, "HEAD", cwd=repo_root)
     if rc != 0:
         return False
     return any(line.strip().startswith("foreman/") for line in stdout.splitlines())

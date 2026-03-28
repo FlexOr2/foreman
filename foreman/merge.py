@@ -42,17 +42,17 @@ class PlanMerger:
             branch = plan_data["branch"]
             log.info("Merging branch %s for plan %s", branch, plan_name)
 
-            success, output = await merge_branch(branch, self.config.repo_root)
+            success, output, pre_merge_ref = await merge_branch(branch, self.config.repo_root)
 
             if success:
-                await self._finalize_merge(plan_name)
+                await self._finalize_merge(plan_name, pre_merge_ref)
                 return
 
             log.warning("Merge conflict for %s, invoking brain", plan_name)
             resolved = await self._brain_resolve_conflict(plan_name, branch)
 
             if resolved:
-                await self._finalize_merge(plan_name)
+                await self._finalize_merge(plan_name, pre_merge_ref)
             else:
                 await abort_merge(self.config.repo_root)
                 self.db.set_plan_status(
@@ -62,13 +62,13 @@ class PlanMerger:
                 if self.on_failure:
                     self.on_failure(plan_name)
 
-    async def _finalize_merge(self, plan_name: str) -> None:
+    async def _finalize_merge(self, plan_name: str, pre_merge_ref: str) -> None:
         log.info("Merged %s successfully", plan_name)
         self.db.set_plan_status(plan_name, PlanStatus.DONE)
         await remove_worktree(plan_name, self.config)
         self._archive_plan(plan_name)
 
-        if self.config.auto_restart and await merge_touched_self(self.config.repo_root):
+        if self.config.auto_restart and await merge_touched_self(self.config.repo_root, pre_merge_ref):
             log.info("Merge of %s modified foreman/ — restart pending", plan_name)
             self.restart_pending = True
 
