@@ -6,8 +6,10 @@ import asyncio
 import json
 import logging
 import re
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from pathlib import Path
 
@@ -19,6 +21,11 @@ log = logging.getLogger(__name__)
 
 BRAIN_TOOLS = "Read,Glob,Grep,Bash"
 BRAIN_TOOLS_WEB = "Read,Glob,Grep,Bash,WebSearch,WebFetch"
+
+_LOG_LOOKBACK_HOURS = 24
+_WARN_KEYWORDS = frozenset({"orphan", "stuck", "timeout", "failed", "crash"})
+_RAPID_FAILURE_COUNT = 3
+_RAPID_FAILURE_WINDOW_SECONDS = 600
 
 
 class IdeaCategory(StrEnum):
@@ -300,11 +307,96 @@ async def _invoke_reviewer(prompt: str, permission_mode: str, timeout: int) -> s
     return response.get("result", "")
 
 
+def _build_runtime_context(config: Config) -> str:
+    error_lines: list[tuple[datetime, str]] = []
+    plan_fail_times: dict[str, list[datetime]] = {}
+
+    if config.log_file.exists():
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=_LOG_LOOKBACK_HOURS)
+        for raw in config.log_file.read_text(encoding="utf-8").splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                entry = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            ts_str = entry.get("ts", "")
+            try:
+                ts = datetime.fromisoformat(ts_str)
+            except ValueError:
+                continue
+            if ts < cutoff:
+                continue
+
+            level = entry.get("level", "")
+            msg = entry.get("msg") or entry.get("event") or ""
+            plan = entry.get("plan", "")
+            prefix = f"[{plan}] " if plan else ""
+            time_str = ts_str[11:19]
+
+            if level == "ERROR" or (level == "WARNING" and any(kw in msg.lower() for kw in _WARN_KEYWORDS)):
+                error_lines.append((ts, f"- {time_str} {prefix}{msg}"))
+                if plan:
+                    plan_fail_times.setdefault(plan, []).append(ts)
+
+    rapid_failures: list[str] = []
+    for plan, times in plan_fail_times.items():
+        times.sort()
+        for i in range(len(times) - (_RAPID_FAILURE_COUNT - 1)):
+            window = (times[i + _RAPID_FAILURE_COUNT - 1] - times[i]).total_seconds()
+            if window <= _RAPID_FAILURE_WINDOW_SECONDS:
+                rapid_failures.append(
+                    f"- {plan}: {len(times)} failures, "
+                    f"{_RAPID_FAILURE_COUNT} in {int(window / 60) + 1} min (rapid failure pattern)"
+                )
+                break
+
+    failed_plans: list[str] = []
+    if config.coordination_db.exists():
+        conn = sqlite3.connect(str(config.coordination_db))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT plan, status, blocked_reason FROM plans WHERE status IN ('FAILED', 'BLOCKED')"
+            ).fetchall()
+        finally:
+            conn.close()
+        for row in rows:
+            reason = row["blocked_reason"] or "no reason recorded"
+            failed_plans.append(f"- {row['plan']}: {row['status']} — {reason}")
+
+    if not error_lines and not rapid_failures and not failed_plans:
+        return ""
+
+    parts = ["## Recent Runtime Issues (from logs)\n"]
+
+    if error_lines:
+        error_lines.sort(key=lambda x: x[0])
+        parts.append("Errors and warnings (last 24h):")
+        parts.extend(line for _, line in error_lines)
+
+    if rapid_failures:
+        parts.append("\nRapid failure patterns:")
+        parts.extend(rapid_failures)
+
+    if failed_plans:
+        parts.append("\nFailed/Blocked plans:")
+        parts.extend(failed_plans)
+
+    parts.append(
+        "\nThese are REAL problems that happened at runtime. "
+        "Prioritize fixing these over code style issues."
+    )
+    return "\n".join(parts) + "\n"
+
+
 def _build_explore_prompt(
     categories: list[str],
     max_ideas: int,
     scope_path: str | None,
     web: bool,
+    runtime_context: str = "",
 ) -> str:
     questions = _select_questions(categories)
 
@@ -338,12 +430,19 @@ def _build_explore_prompt(
             "and feature requests in this space.\n"
         )
 
+    runtime_section = f"\n{runtime_context}\n" if runtime_context else ""
+    priority_instruction = (
+        "Runtime failures from the logs are higher priority than static code analysis findings. "
+        "A bug that crashes the system is more important than a private method being called from the wrong module.\n\n"
+        if runtime_context else ""
+    )
+
     return f"""\
 You are an autonomous innovation agent. Your job is to deeply analyze a codebase and discover non-obvious improvement opportunities.
-
+{priority_instruction}
 ## Phase 1: Explore
 Read the codebase structure, dependencies, recent git log, README, CLAUDE.md, config files, and entry points. Understand what this project does, how it works, and what its current state is.
-{scope_instruction}{web_instruction}
+{scope_instruction}{web_instruction}{runtime_section}
 ## Phase 2: Provoke
 Think deeply about these questions. Don't settle for surface-level answers — dig into the code to find real insights.
 {questions_block}
@@ -602,7 +701,8 @@ async def innovate(
     written: list[Path] = []
 
     if regular_categories:
-        prompt = _build_explore_prompt(regular_categories, effective_max, scope_path, web)
+        runtime_context = _build_runtime_context(config)
+        prompt = _build_explore_prompt(regular_categories, effective_max, scope_path, web, runtime_context)
         log.info("Exploring codebase — categories: %s", ", ".join(regular_categories))
         result = await brain.think(prompt)
 
