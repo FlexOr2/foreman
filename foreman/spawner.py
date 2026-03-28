@@ -219,7 +219,7 @@ def _build_launcher_script(
         f'  --append-system-prompt "$(cat {shlex.quote(str(prompt_path))})"',
         f"  --permission-mode {shlex.quote(config.agents.permission_mode)}",
         f"  --model {shlex.quote(config.agents.model)}",
-        f"  --name {shlex.quote(f'foreman:{plan.name}')}",
+        f"  --name {shlex.quote(f'foreman:{plan.name}:{agent_type.value}')}",
         f"  --add-dir {shlex.quote(str(plans_dir))}",
     ]
 
