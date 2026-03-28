@@ -33,6 +33,7 @@ def _build_launcher_script(
     agent_type: AgentType,
     config: Config,
     initial_message: str,
+    model_override: str | None = None,
 ) -> str:
     prompt_path = config.get_prompt_path(agent_type).resolve()
     plans_dir = config.plans_dir.resolve()
@@ -57,7 +58,7 @@ def _build_launcher_script(
         "  --output-format json",
         f'  --append-system-prompt "$(cat {shlex.quote(str(prompt_path))})"',
         f"  --permission-mode {shlex.quote(config.agents.permission_mode)}",
-        f"  --model {shlex.quote(config.agents.model)}",
+        f"  --model {shlex.quote(model_override or config.agents.model)}",
         f"  --name {shlex.quote(f'foreman:{plan.name}:{agent_type.value}')}",
         f"  --add-dir {shlex.quote(str(plans_dir))}",
     ]
@@ -102,9 +103,10 @@ class Spawner:
         worktree_path: Path,
         agent_type: AgentType,
         initial_message: str,
+        model_override: str | None = None,
     ) -> int | None:
         script_content = _build_launcher_script(
-            plan, worktree_path, agent_type, self.config, initial_message,
+            plan, worktree_path, agent_type, self.config, initial_message, model_override,
         )
 
         script_path = self.config.scripts_dir / _script_filename(plan.name, agent_type)

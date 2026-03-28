@@ -149,6 +149,7 @@ class AgentScheduler:
 
         pid = await self.spawner.spawn_agent(
             plan, worktree_path, AgentType.REVIEW, initial_message,
+            model_override=plan_data.get("model_override"),
         )
 
         with self.db.tx():

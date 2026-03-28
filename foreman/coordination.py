@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS plans (
     worktree_path TEXT,
     started_at TEXT,
     updated_at TEXT,
-    blocked_reason TEXT
+    blocked_reason TEXT,
+    model_override TEXT
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -75,6 +76,10 @@ class CoordinationDB:
         self._conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        try:
+            self._conn.execute("ALTER TABLE plans ADD COLUMN model_override TEXT")
+        except sqlite3.OperationalError:
+            pass
         self._in_tx = False
 
     def close(self) -> None:
@@ -130,6 +135,13 @@ class CoordinationDB:
             self._conn.execute(
                 "UPDATE plans SET blocked_reason=?, updated_at=? WHERE plan=?",
                 (reason, _now(), plan),
+            )
+
+    def set_model_override(self, plan: str, model: str | None) -> None:
+        with self.tx():
+            self._conn.execute(
+                "UPDATE plans SET model_override=?, updated_at=? WHERE plan=?",
+                (model, _now(), plan),
             )
 
     def get_plan_status(self, plan: str) -> PlanStatus | None:
