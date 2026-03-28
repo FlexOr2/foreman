@@ -18,6 +18,7 @@ PROCESS_POLL_INTERVAL = 2
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
 FOREMAN_DIR = ".foreman"
+RELOAD_CONFIG_MARKER = f"{FOREMAN_DIR}/reload_config"
 
 
 @dataclass
@@ -201,3 +202,78 @@ def load_config(repo_root: Path | None = None) -> Config:
 
     config.resolve_paths()
     return config
+
+
+def _toml_value(v: object) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return str(v)
+    if isinstance(v, str):
+        return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    if isinstance(v, list):
+        return "[" + ", ".join(_toml_value(x) for x in v) + "]"
+    raise TypeError(f"Cannot serialize {type(v)} to TOML")
+
+
+def _write_toml_section(data: dict, path: list[str], lines: list[str]) -> None:
+    for key, value in data.items():
+        if not isinstance(value, dict):
+            lines.append(f"{key} = {_toml_value(value)}")
+    for key, value in data.items():
+        if isinstance(value, dict):
+            section_path = path + [key]
+            lines.append("")
+            lines.append(f"[{'.'.join(section_path)}]")
+            _write_toml_section(value, section_path, lines)
+
+
+def save_config(config: Config) -> None:
+    config_path = config.repo_root / FOREMAN_DIR / "config.toml"
+    existing: dict = {}
+    if config_path.exists():
+        with open(config_path, "rb") as f:
+            existing = tomllib.load(f)
+
+    foreman = existing.setdefault("foreman", {})
+    foreman["auto_restart"] = config.auto_restart
+
+    agents = foreman.setdefault("agents", {})
+    agents["max_parallel_workers"] = config.agents.max_parallel_workers
+    agents["max_parallel_reviews"] = config.agents.max_parallel_reviews
+    agents["model"] = config.agents.model
+
+    timeouts = foreman.setdefault("timeouts", {})
+    timeouts["implementation"] = config.timeouts.implementation
+    timeouts["review"] = config.timeouts.review
+    timeouts["stuck_threshold"] = config.timeouts.stuck_threshold
+
+    innovate = foreman.setdefault("innovate", {})
+    innovate["enabled"] = config.innovate.enabled
+    innovate["auto_activate"] = config.innovate.auto_activate
+    innovate["max_drafts"] = config.innovate.max_drafts
+    innovate["interval"] = config.innovate.interval
+    innovate["skip_review"] = config.innovate.skip_review
+    innovate["categories"] = config.innovate.categories
+
+    lines: list[str] = []
+    _write_toml_section(existing, [], lines)
+    config_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+
+
+def apply_config_update(target: Config, updated: Config) -> None:
+    target.auto_restart = updated.auto_restart
+    target.agents.max_parallel_workers = updated.agents.max_parallel_workers
+    target.agents.max_parallel_reviews = updated.agents.max_parallel_reviews
+    target.agents.model = updated.agents.model
+    target.timeouts.implementation = updated.timeouts.implementation
+    target.timeouts.review = updated.timeouts.review
+    target.timeouts.stuck_threshold = updated.timeouts.stuck_threshold
+    target.innovate.enabled = updated.innovate.enabled
+    target.innovate.auto_activate = updated.innovate.auto_activate
+    target.innovate.max_drafts = updated.innovate.max_drafts
+    target.innovate.interval = updated.innovate.interval
+    target.innovate.skip_review = updated.innovate.skip_review
+    target.innovate.categories = updated.innovate.categories
