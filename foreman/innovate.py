@@ -108,7 +108,6 @@ QUESTIONS: dict[IdeaCategory, list[str]] = {
 
 DEFENSIVE_CATEGORIES = {IdeaCategory.RISK, IdeaCategory.PERFORMANCE, IdeaCategory.ARCHITECTURE, IdeaCategory.DEBT, IdeaCategory.DX}
 CREATIVE_CATEGORIES = {IdeaCategory.FEATURES, IdeaCategory.COMPETITIVE, IdeaCategory.DELIGHT, IdeaCategory.MOONSHOTS}
-CREATE_CATEGORIES = {IdeaCategory.CREATE}
 
 
 _DEVIL_PROMPT = """\
@@ -587,8 +586,8 @@ async def innovate(
     effective_categories = categories or config.innovate.categories
     effective_max = max_ideas or config.innovate.max_ideas
 
-    create_enabled = IdeaCategory.CREATE.value in effective_categories
-    regular_categories = [c for c in effective_categories if c != IdeaCategory.CREATE.value]
+    create_enabled = IdeaCategory.CREATE in effective_categories
+    regular_categories = [c for c in effective_categories if c != IdeaCategory.CREATE]
 
     tools = BRAIN_TOOLS_WEB if web else BRAIN_TOOLS
     foreman_dir = config.repo_root / ".foreman"
