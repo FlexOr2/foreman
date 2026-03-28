@@ -194,17 +194,20 @@ class ForemanLoop:
 
     async def _plan_watcher(self) -> None:
         async def on_plan_event(file_path: Path, mask: Mask) -> None:
-            name = file_path.stem
+            try:
+                name = file_path.stem
 
-            if mask & (Mask.CREATE | Mask.MOVED_TO):
-                log.info("New plan file: %s", file_path.name)
-                await self._scan_plans()
-                self.scheduler.schedule_event.set()
-
-            elif mask & Mask.MODIFY:
-                status = self.db.get_plan_status(name)
-                if status not in (PlanStatus.RUNNING, PlanStatus.REVIEWING):
+                if mask & (Mask.CREATE | Mask.MOVED_TO):
+                    log.info("New plan file: %s", file_path.name)
                     await self._scan_plans()
+                    self.scheduler.schedule_event.set()
+
+                elif mask & Mask.MODIFY:
+                    status = self.db.get_plan_status(name)
+                    if status not in (PlanStatus.RUNNING, PlanStatus.REVIEWING):
+                        await self._scan_plans()
+            except Exception:
+                log.error("Error processing plan event for %s", file_path, exc_info=True)
 
         await watch_plans(self.config.plans_dir, on_plan_event)
 
