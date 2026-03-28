@@ -79,9 +79,7 @@ class Config:
     agents: AgentConfig = field(default_factory=AgentConfig)
     innovate: InnovateConfig = field(default_factory=InnovateConfig)
 
-    allowed_tools: dict[str, str] = field(default_factory=lambda: {
-        AgentType.REVIEW: "Read,Glob,Grep,Bash,Write",
-    })
+    allowed_tools: dict[str, str] = field(default_factory=dict)
 
     auto_restart: bool = True
     web_port: int = 8765
