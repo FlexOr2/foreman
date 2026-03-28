@@ -14,7 +14,7 @@ from pathlib import Path
 from foreman.config import FOREMAN_DIR, load_config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.spawner import AGENT_TYPE_SEP, TMUX_SESSION
-from foreman.worktree import branch_has_commits
+from foreman.worktree import abort_merge, branch_has_commits, merge_branch, remove_worktree
 
 log = logging.getLogger(__name__)
 
@@ -124,6 +124,7 @@ async def _handle_orphaned_plan(db: CoordinationDB, plan: dict, config) -> None:
         success, _, _ = await merge_branch(branch, config.repo_root)
         if success:
             db.set_plan_status(plan_name, PlanStatus.DONE)
+            await remove_worktree(plan_name, config)
             plan_file = config.plans_dir / f"{plan_name}.md"
             plan_file.unlink(missing_ok=True)
             log.info("Merged orphaned plan %s", plan_name)
