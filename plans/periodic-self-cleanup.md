@@ -29,6 +29,15 @@ After every M innovation cycles (configurable, default 5), run a test cycle. The
 
 Generates test plans that the implementation agent writes as pytest tests.
 
+### 3. Update CLAUDE.md as part of cleanup
+
+The cleanup cycle should also check if CLAUDE.md still reflects the actual codebase:
+- Are the module descriptions accurate after refactors?
+- Are there new conventions that emerged and should be documented?
+- Are there rules that no longer apply?
+
+If CLAUDE.md is outdated, generate a plan to update it. This keeps the review agent's architecture checks grounded in reality.
+
 ### 3. Config
 
 ```toml
