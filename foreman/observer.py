@@ -14,7 +14,7 @@ from pathlib import Path
 from foreman.config import FOREMAN_DIR, load_config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.spawner import AGENT_TYPE_SEP, TMUX_SESSION
-from foreman.worktree import abort_merge, branch_has_commits, merge_branch, remove_worktree
+from foreman.worktree import branch_has_commits
 
 log = logging.getLogger(__name__)
 
@@ -120,22 +120,18 @@ def _start_foreman(repo_root: Path) -> subprocess.Popen:
 async def _handle_orphaned_plan(db: CoordinationDB, plan: dict, config) -> None:
     plan_name = plan["plan"]
     branch = plan.get("branch")
+    plan_file = config.plans_dir / f"{plan_name}.md"
 
     if branch and await branch_has_commits(branch, config.repo_root):
-        success, _, _ = await merge_branch(branch, config.repo_root)
-        if success:
-            db.set_plan_status(plan_name, PlanStatus.DONE)
-            await remove_worktree(plan_name, config)
-            plan_file = config.plans_dir / f"{plan_name}.md"
-            plan_file.unlink(missing_ok=True)
-            log.info("Merged orphaned plan %s", plan_name)
-        else:
-            await abort_merge(config.repo_root)
-            db.set_plan_status(plan_name, PlanStatus.BLOCKED, reason="Observer: merge conflict")
-            log.warning("Merge conflict for orphaned plan %s, marked BLOCKED", plan_name)
+        db.set_plan_status(plan_name, PlanStatus.RUNNING)
+        if plan_file.exists():
+            plan_file.touch()
+        log.info("Reset orphaned plan %s to RUNNING, touched plan file to wake scheduler", plan_name)
     else:
         db.set_plan_status(plan_name, PlanStatus.QUEUED)
-        log.info("Reset stuck plan %s to QUEUED", plan_name)
+        if plan_file.exists():
+            plan_file.touch()
+        log.info("Reset stuck plan %s to QUEUED, touched plan file to wake scheduler", plan_name)
 
 
 async def observe_loop(repo_root: Path) -> None:
