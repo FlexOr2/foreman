@@ -13,7 +13,7 @@ from pathlib import Path
 from foreman.config import FOREMAN_DIR, load_config
 from foreman.coordination import CoordinationDB, PlanStatus
 from foreman.spawner import AGENT_TYPE_SEP, TMUX_SESSION
-from foreman.worktree import abort_merge, branch_has_commits, merge_branch
+from foreman.worktree import branch_has_commits
 
 log = logging.getLogger(__name__)
 
@@ -105,6 +105,7 @@ def _start_foreman(repo_root: Path) -> None:
         [sys.executable, "-m", "foreman.cli", "start"],
         cwd=repo_root,
         start_new_session=True,
+        stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
