@@ -16,7 +16,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from foreman.config import ALL_IDEA_CATEGORIES, FOREMAN_DIR, Config, RELOAD_CONFIG_MARKER, save_config
 from foreman.plan_parser import is_valid_plan_name
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
-from foreman.innovate import INNOVATOR_MARKER
 from foreman.observer import PID_FILE_FOREMAN, PID_FILE_OBSERVER, is_process_running
 from foreman.spawner import Spawner, log_filename
 
@@ -307,8 +306,7 @@ def _render_drafts(config: Config) -> str:
     rows = []
     for path in drafts:
         name = path.stem[len("draft-"):]
-        is_innovator = INNOVATOR_MARKER in path.read_text(encoding="utf-8")[:120]
-        tag = ' <span class="dim">(innovator)</span>' if is_innovator else ""
+        tag = ' <span class="dim">(innovator)</span>'
         esc = _h(name)
         rows.append(
             f"<tr>"
