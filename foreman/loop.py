@@ -21,6 +21,7 @@ from foreman.preflight import check_prerequisites
 from foreman.resolver import CircularDependencyError, UnresolvedDependencyError, validate_dag
 from foreman.scheduler import AgentScheduler
 from foreman.spawner import AGENT_TYPE_SEP, Spawner
+from foreman.observer import PID_FILE_FOREMAN, remove_pid, write_pid
 from foreman.watchdog import AgentWatchdog
 from foreman.worktree import branch_has_commits
 
@@ -69,6 +70,7 @@ class ForemanLoop:
     async def run(self) -> int:
         check_prerequisites()
         self.config.ensure_dirs()
+        write_pid(self.config.repo_root, PID_FILE_FOREMAN)
         await self.spawner.setup()
 
         loop = asyncio.get_event_loop()
@@ -125,6 +127,7 @@ class ForemanLoop:
             self.brain.save()
 
         self.db.close()
+        remove_pid(self.config.repo_root, PID_FILE_FOREMAN)
         await self.spawner.teardown()
         log.info("Shutdown complete. tmux session left alive for manual inspection.")
 
