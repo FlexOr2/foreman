@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from foreman.config import FOREMAN_DIR, load_config
-from foreman.coordination import CoordinationDB, PlanStatus
+from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.spawner import AGENT_TYPE_SEP, TMUX_SESSION
 from foreman.worktree import abort_merge, branch_has_commits, merge_branch
 
@@ -171,8 +171,8 @@ async def observe_loop(repo_root: Path) -> None:
 
                     plan_name = plan["plan"]
                     has_live_window = False
-                    for suffix in ("implementation", "review", "fix"):
-                        terminal = f"{plan_name}{AGENT_TYPE_SEP}{suffix}"
+                    for agent_type in AgentType:
+                        terminal = f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}"
                         if await _tmux_has_window(terminal):
                             has_live_window = True
                             break
