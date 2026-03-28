@@ -11,7 +11,7 @@ _DEPENDS_RE = re.compile(
     re.IGNORECASE,
 )
 _VALID_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
-_SKIP_PREFIXES = ("draft-", "prompt-")
+_SKIP_PREFIXES = ("draft-",)
 
 
 class InvalidPlanNameError(ValueError):

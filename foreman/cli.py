@@ -445,7 +445,7 @@ def unblock(plan_name: str, repo: Path = Path("."), *, clean: bool = False) -> N
         previous_reason = db.get_plan(plan_name).get("blocked_reason", "")
 
         if clean:
-            from foreman.worktree import branch_has_commits, remove_worktree
+            from foreman.worktree import branch_has_commits
 
             branch = f"{config.branch_prefix}{plan_name}"
 
@@ -569,26 +569,6 @@ def innovate(
         f"\n[bold]{len(drafts)}[/bold] draft plans written. "
         f"Review and rename (remove 'draft-' prefix) to approve."
     )
-
-
-@app.command
-def retry(plan_name: str, repo: Path = Path(".")) -> None:
-    """Retry a failed or blocked plan — removes worktree, re-queues for next scheduler cycle."""
-    _setup_logging()
-    config = load_config(repo.resolve())
-    db = CoordinationDB(config.coordination_db)
-
-    try:
-        status = db.get_plan_status(plan_name)
-        if status not in (PlanStatus.FAILED, PlanStatus.BLOCKED):
-            console.print(f"[yellow]Plan {plan_name} is not failed or blocked[/yellow] (status: {status})")
-            return
-
-        asyncio.run(remove_worktree(plan_name, config))
-        db.set_plan_status(plan_name, PlanStatus.QUEUED)
-        console.print(f"Re-queued [bold]{plan_name}[/bold] — will be picked up on next scheduler cycle")
-    finally:
-        db.close()
 
 
 @app.command
