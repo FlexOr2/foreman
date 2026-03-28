@@ -421,7 +421,7 @@ def resume(plan_name: str, repo: Path = Path(".")) -> None:
     db.close()
     plan_file = config.plans_dir / f"{plan_name}.md"
     if plan_file.exists():
-        plan_file.touch()
+        plan_file.write_bytes(plan_file.read_bytes())
     console.print(f"Queued [bold]{plan_name}[/bold] for resumption — main loop will spawn the agent")
 
 

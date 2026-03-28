@@ -90,18 +90,22 @@ class AgentScheduler:
     async def spawn_implementation(self, plan: Plan) -> None:
         log.info("Spawning implementation agent for %s", plan.name)
 
-        if (self.config.worktree_dir / plan.name).exists():
-            log.info("Removing stale worktree for %s before fresh spawn", plan.name)
-            await remove_worktree(plan.name, self.config)
-
+        resuming = (self.config.worktree_dir / plan.name).exists()
         worktree_path, branch = await create_worktree(plan.name, self.config)
 
         plan_file = plan.file_path.resolve()
-        initial_message = (
-            f"Read and implement the plan at {plan_file}. "
-            f"Branch: {branch}. "
-            f"Commit all your changes when done."
-        )
+        if resuming:
+            initial_message = (
+                f"You are resuming work on this plan. "
+                f"Read the plan at {plan_file} and review what has already been done on branch {branch}. "
+                f"Continue where the previous agent left off."
+            )
+        else:
+            initial_message = (
+                f"Read and implement the plan at {plan_file}. "
+                f"Branch: {branch}. "
+                f"Commit all your changes when done."
+            )
 
         try:
             pid = await self.spawner.spawn_agent(

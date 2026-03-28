@@ -708,7 +708,7 @@ def create_app(config: Config) -> FastAPI:
             db.close()
         plan_file = config.plans_dir / f"{plan_name}.md"
         if plan_file.exists():
-            plan_file.touch()
+            plan_file.write_bytes(plan_file.read_bytes())
         return RedirectResponse("/", status_code=303)
 
     @app.post("/plans/{plan_name}/kill")
