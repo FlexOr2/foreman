@@ -10,7 +10,7 @@ from typing import Any
 from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, StuckAction
 from foreman.monitor import StuckDetector
-from foreman.spawner import AGENT_TYPE_SEP, Spawner
+from foreman.spawner import AGENT_TYPE_SEP, Spawner, read_exit_code
 
 log = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class AgentWatchdog:
             agent_id = self.on_finish_agent(plan_name) if self.on_finish_agent else None
 
             if sentinel_file.exists():
-                exit_code = self._read_exit_code(sentinel_name, plan_name)
+                exit_code = read_exit_code(self.config.repo_root / ".foreman" / "done", sentinel_name)
                 sentinel_file.unlink(missing_ok=True)
                 if agent_id is not None:
                     self.db.finish_agent(agent_id, exit_code)
@@ -99,14 +99,6 @@ class AgentWatchdog:
 
         if reconciled:
             schedule_event.set()
-
-    def _read_exit_code(self, sentinel_name: str, plan_name: str) -> int:
-        done_file = self.config.repo_root / ".foreman" / "done" / sentinel_name
-        try:
-            return int(done_file.read_text().strip())
-        except (ValueError, FileNotFoundError):
-            log.warning("Sentinel file missing or unreadable for %s, treating as crash", sentinel_name, extra={"plan": plan_name})
-            return 1
 
     async def try_restart(
         self,

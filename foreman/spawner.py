@@ -23,6 +23,15 @@ def log_filename(plan_name: str, agent_type: AgentType) -> str:
     return f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}.log"
 
 
+def read_exit_code(done_dir: Path, sentinel_name: str) -> int:
+    done_file = done_dir / sentinel_name
+    try:
+        return int(done_file.read_text().strip())
+    except (ValueError, FileNotFoundError):
+        log.warning("Sentinel file missing or unreadable for %s, treating as crash", sentinel_name)
+        return 1
+
+
 def _script_filename(plan_name: str, agent_type: AgentType) -> str:
     return f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}.sh"
 
