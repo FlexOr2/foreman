@@ -65,7 +65,7 @@ def _build_launcher_script(
     if tools:
         cmd_parts.append(f"  --allowed-tools {shlex.quote(tools)}")
 
-    lines.append(" \\\n".join(cmd_parts) + f" > {log_path} 2>&1")
+    lines.append(" \\\n".join(cmd_parts) + f" 2>> {log_path}")
     lines.append("_ec=$?")
     return "\n".join(lines) + "\n"
 
