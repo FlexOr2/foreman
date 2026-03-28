@@ -154,11 +154,6 @@ function confirmDelete(name) {
     setTimeout(() => location.reload(), 300);
   }
 }
-function confirmUnblockClean(name) {
-  if (confirm('Unblock ' + name + ' and discard existing worktree?')) {
-    document.getElementById('unblock-clean-form-' + name).submit();
-  }
-}
 function showResume(planName, hasWorktree) {
   document.getElementById('resume-plan-name').textContent = planName;
   var enc = encodeURIComponent(planName);
