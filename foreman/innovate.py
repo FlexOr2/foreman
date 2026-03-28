@@ -913,9 +913,10 @@ def save_cycle_count(foreman_dir: Path, cycle: int) -> None:
 
 def _build_cleanup_prompt(review_template: str, max_plans: int) -> str:
     return (
-        f"{review_template}\n\n---\n\n"
-        f"## Generate Refactoring Plans\n\n"
-        f"Based on The Bad and The Ugly sections of your review above, generate concrete refactoring plans.\n\n"
+        f"You are an autonomous cleanup agent. Use the following review framework as your INTERNAL analysis guide. "
+        f"Do NOT output the review itself — only use it to find concrete issues, then output refactoring plans.\n\n"
+        f"## Review Framework\n\n{review_template}\n\n---\n\n"
+        f"Analyze the codebase using the framework above. Then generate concrete refactoring plans for the issues you find.\n\n"
         f"{_CLEANUP_EXTRA_CHECKS}\n\n"
         f"Generate at most {max_plans} plans.\n\n"
         f"{_CLEANUP_OUTPUT_FORMAT}"
