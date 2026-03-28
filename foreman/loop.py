@@ -20,7 +20,7 @@ from foreman.plan_parser import InvalidPlanNameError, Plan, load_plans
 from foreman.preflight import check_prerequisites
 from foreman.resolver import CircularDependencyError, UnresolvedDependencyError, validate_dag
 from foreman.scheduler import AgentScheduler
-from foreman.spawner import AGENT_TYPE_SEP, Spawner
+from foreman.spawner import AGENT_TYPE_SEP, Spawner, read_exit_code
 from foreman.observer import PID_FILE_FOREMAN, remove_pid, write_pid
 from foreman.watchdog import AgentWatchdog
 from foreman.worktree import branch_has_commits
@@ -245,7 +245,7 @@ class ForemanLoop:
             done_file.unlink(missing_ok=True)
             return
 
-        exit_code = self._read_exit_code(sentinel_name)
+        exit_code = read_exit_code(self.config.repo_root / ".foreman" / "done", sentinel_name)
         log.info("Agent %s/%s finished (exit code: %s)", plan_name, agent_type.value, exit_code)
 
         agent_id = self.scheduler.finish_agent(plan_name)
@@ -282,14 +282,6 @@ class ForemanLoop:
     async def _done_watcher(self) -> None:
         done_dir = self.config.repo_root / ".foreman" / "done"
         await watch_done(done_dir, self._handle_agent_done)
-
-    def _read_exit_code(self, sentinel_name: str) -> int:
-        done_file = self.config.repo_root / ".foreman" / "done" / sentinel_name
-        try:
-            return int(done_file.read_text().strip())
-        except (ValueError, FileNotFoundError):
-            log.warning("Sentinel file missing or unreadable for %s, treating as crash", sentinel_name)
-            return 1
 
     # --- Scheduler ---
 
