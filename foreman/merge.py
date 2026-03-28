@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -24,7 +25,7 @@ class PlanMerger:
         self.db = db
         self.config = config
         self.plans: dict[str, Plan] = {}
-        self.restart_pending = False
+        self._restart_requested_at: float | None = None
         self._merge_lock = asyncio.Lock()
         self.on_failure: Callable[[str], None] | None = None
         self.on_rebase_needed: Callable[[str], Coroutine[Any, Any, None]] | None = None
@@ -64,8 +65,20 @@ class PlanMerger:
         self._archive_plan(plan_name)
 
         if self.config.auto_restart and await merge_touched_self(self.config.repo_root, pre_merge_ref):
-            log.info("Merge of %s modified foreman/ — restart pending", plan_name)
-            self.restart_pending = True
+            log.info("Merge of %s modified foreman/ — restart requested", plan_name)
+            self._restart_requested_at = time.monotonic()
+
+    @property
+    def restart_requested(self) -> bool:
+        return self._restart_requested_at is not None
+
+    def should_restart(self) -> bool:
+        if self._restart_requested_at is None:
+            return False
+        elapsed = time.monotonic() - self._restart_requested_at
+        if elapsed >= self.config.timeouts.restart_cooldown:
+            return True
+        return len(self.db.get_plans_by_status(PlanStatus.QUEUED)) == 0
 
     def _archive_plan(self, plan_name: str) -> None:
         plan = self.plans.get(plan_name)

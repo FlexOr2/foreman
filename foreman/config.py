@@ -30,6 +30,7 @@ class TimeoutConfig:
     rebase: int = 1800
     stuck_threshold: int = 300
     brain_timeout: int = 900
+    restart_cooldown: int = 120
 
 
 @dataclass
