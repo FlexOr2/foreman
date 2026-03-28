@@ -11,7 +11,7 @@ from typing import Any
 
 from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, ReviewVerdict
-from foreman.monitor import CompletionDetector, StuckDetector
+from foreman.monitor import StuckDetector
 from foreman.plan_parser import Plan
 from foreman.resolver import get_ready_plans
 from foreman.spawner import Spawner, log_filename
@@ -27,13 +27,11 @@ class AgentScheduler:
         spawner: Spawner,
         config: Config,
         stuck: StuckDetector,
-        completion: CompletionDetector,
     ) -> None:
         self.db = db
         self.spawner = spawner
         self.config = config
         self.stuck = stuck
-        self.completion = completion
         self.plans: dict[str, Plan] = {}
         self.pending_reviews: set[str] = set()
         self.active_agent_ids: dict[str, int] = {}
@@ -109,12 +107,10 @@ class AgentScheduler:
                 log.warning("Failed to clean up worktree for %s", plan.name, exc_info=True)
             raise
 
-        terminal = self.spawner.terminal_name(plan.name, AgentType.IMPLEMENTATION)
-        self.stuck.track(plan.name, terminal)
-        self.completion.track(plan.name, terminal)
+        self.stuck.track(plan.name)
         timeout = self.config.get_timeout(plan.name, AgentType.IMPLEMENTATION)
         if timeout > 0:
-            self.stuck.track_timeout(plan.name, terminal, timeout)
+            self.stuck.track_timeout(plan.name, timeout)
 
     async def on_implementation_done(self, plan_name: str) -> None:
         if self.config.agents.auto_review:
@@ -152,12 +148,10 @@ class AgentScheduler:
             )
             self.active_agent_ids[plan_name] = agent_id
 
-        terminal = self.spawner.terminal_name(plan_name, AgentType.REVIEW)
-        self.stuck.track(plan_name, terminal)
-        self.completion.track(plan_name, terminal)
+        self.stuck.track(plan_name)
         timeout = self.config.get_timeout(plan_name, AgentType.REVIEW)
         if timeout > 0:
-            self.stuck.track_timeout(plan_name, terminal, timeout)
+            self.stuck.track_timeout(plan_name, timeout)
         log.info("Spawned review agent for %s", plan_name)
 
     async def on_review_done(self, plan_name: str) -> None:
@@ -257,12 +251,10 @@ class AgentScheduler:
             )
             self.active_agent_ids[plan_name] = agent_id
 
-        terminal = self.spawner.terminal_name(plan_name, AgentType.FIX)
-        self.stuck.track(plan_name, terminal)
-        self.completion.track(plan_name, terminal)
+        self.stuck.track(plan_name)
         timeout = self.config.get_timeout(plan_name, AgentType.FIX)
         if timeout > 0:
-            self.stuck.track_timeout(plan_name, terminal, timeout)
+            self.stuck.track_timeout(plan_name, timeout)
         log.info("Spawned fix agent for %s", plan_name)
 
     async def on_fix_done(self, plan_name: str) -> None:
@@ -271,7 +263,9 @@ class AgentScheduler:
 
     async def on_review_failure(self, plan_name: str) -> bool:
         branch = self.db.get_plan(plan_name)["branch"]
-        if await branch_has_commits(branch, self.config.repo_root):
+        has_commits = await branch_has_commits(branch, self.config.repo_root)
+        log.debug("on_review_failure: %s branch=%s has_commits=%s", plan_name, branch, has_commits)
+        if has_commits:
             self.db.set_plan_status(plan_name, PlanStatus.RUNNING)
             self.pending_reviews.add(plan_name)
             self.schedule_event.set()

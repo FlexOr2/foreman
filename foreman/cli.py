@@ -503,15 +503,8 @@ def guide(plan_name: str, message: str, repo: Path = Path(".")) -> None:
         db.close()
         return
 
-    agent_type = db.get_active_agent_type(plan_name) or AgentType.IMPLEMENTATION
-
-    async def _guide() -> None:
-        spawner = Spawner(config)
-        await spawner.notify_agent(plan_name, agent_type, message)
-
-    asyncio.run(_guide())
     db.close()
-    console.print(f"Sent guidance to [bold]{plan_name}[/bold] ({agent_type.value} agent)")
+    console.print("[yellow]Guidance is not supported in print mode — agents run non-interactively[/yellow]")
 
 
 @app.command

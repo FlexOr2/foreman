@@ -9,7 +9,7 @@ from typing import Any
 
 from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus, StuckAction
-from foreman.monitor import CompletionDetector, StuckDetector, TOOL_RUNNING_MARKER
+from foreman.monitor import StuckDetector
 from foreman.spawner import AGENT_TYPE_SEP, Spawner
 
 log = logging.getLogger(__name__)
@@ -24,13 +24,11 @@ class AgentWatchdog:
         db: CoordinationDB,
         spawner: Spawner,
         stuck: StuckDetector,
-        completion: CompletionDetector,
         config: Config,
     ) -> None:
         self.db = db
         self.spawner = spawner
         self.stuck = stuck
-        self.completion = completion
         self.config = config
         self._stuck_warned: set[str] = set()
         self.on_agent_done: Callable[[str, AgentType], Coroutine[Any, Any, None]] | None = None
@@ -62,13 +60,11 @@ class AgentWatchdog:
             if not agent_type:
                 continue
 
-            terminal = self.spawner.terminal_name(plan_name, agent_type)
-            if await self.spawner.has_window(terminal):
+            if await self.spawner.is_agent_alive(plan_name, agent_type):
                 continue
 
-            log.warning("Orphaned plan %s — agent window gone, processing completion", plan_name)
+            log.warning("Orphaned plan %s — agent process gone, processing completion", plan_name)
             self.stuck.cancel(plan_name)
-            self.completion.cancel(plan_name)
 
             sentinel_name = f"{plan_name}{AGENT_TYPE_SEP}{agent_type.value}"
             sentinel_file = self.config.repo_root / ".foreman" / "done" / sentinel_name
@@ -123,15 +119,13 @@ class AgentWatchdog:
             truly_active = False
             for plan_name in active:
                 agent_type = self.db.get_active_agent_type(plan_name)
-                if agent_type:
-                    terminal = self.spawner.terminal_name(plan_name, agent_type)
-                    if await self.spawner.has_window(terminal):
-                        truly_active = True
-                        break
+                if agent_type and await self.spawner.is_agent_alive(plan_name, agent_type):
+                    truly_active = True
+                    break
             if truly_active:
                 log.info("Restart pending — waiting for %d active agents to finish", len(active))
                 return
-            log.info("All agent windows gone — proceeding with restart")
+            log.info("All agent processes gone — proceeding with restart")
 
         if pending_reviews:
             log.info("Restart pending — waiting for %d pending reviews", len(pending_reviews))
@@ -144,19 +138,13 @@ class AgentWatchdog:
         log.info("All agents finished — restarting to apply self-improvements")
         request_shutdown()
 
-    async def on_agent_stuck(self, plan_name: str, terminal: str | None) -> None:
+    async def on_agent_stuck(self, plan_name: str) -> None:
         reason = f"Agent appears stuck (no activity for {self.config.timeouts.stuck_threshold}s)"
         self.db.set_blocked_reason(plan_name, reason)
         self._stuck_warned.add(plan_name)
         log.warning("Agent %s is stuck — surfacing in dashboard", plan_name)
 
-        if self.config.agents.stuck_action != StuckAction.KILL or not terminal:
-            return
-
-        content = await self.spawner.capture_output(terminal)
-        if content and TOOL_RUNNING_MARKER in content.lower():
-            log.info("Agent %s is mid-tool-execution, skipping kill — re-arming timer", plan_name)
-            self.stuck.on_log_activity(plan_name)
+        if self.config.agents.stuck_action != StuckAction.KILL:
             return
 
         log.warning("Killing stuck agent %s", plan_name)
@@ -164,27 +152,17 @@ class AgentWatchdog:
         if agent_type:
             await self.spawner.kill_agent(plan_name, agent_type)
         self.stuck.cancel(plan_name)
-        self.completion.cancel(plan_name)
         self._stuck_warned.discard(plan_name)
         self.db.set_plan_status(plan_name, PlanStatus.FAILED, reason=reason)
         if self.on_cascade:
             self.on_cascade(plan_name)
 
-    async def on_agent_timeout(self, plan_name: str, terminal: str | None) -> None:
+    async def on_agent_timeout(self, plan_name: str) -> None:
         log.warning("Hard timeout fired for %s", plan_name)
-
-        if terminal:
-            content = await self.spawner.capture_output(terminal)
-            if content and TOOL_RUNNING_MARKER in content.lower():
-                log.info("Agent %s is mid-tool-execution, granting %ds grace period", plan_name, TIMEOUT_GRACE_PERIOD)
-                self.stuck.track_timeout(plan_name, terminal, TIMEOUT_GRACE_PERIOD)
-                return
-
         agent_type = self.db.get_active_agent_type(plan_name)
         if agent_type:
             await self.spawner.kill_agent(plan_name, agent_type)
         self.stuck.cancel(plan_name)
-        self.completion.cancel(plan_name)
         self.db.set_plan_status(plan_name, PlanStatus.FAILED, reason="Agent exceeded hard timeout")
         if self.on_cascade:
             self.on_cascade(plan_name)

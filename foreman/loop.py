@@ -15,7 +15,7 @@ from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.dashboard import run_dashboard
 from foreman.innovate import DRAFT_PREFIX, innovate
 from foreman.merge import PlanMerger
-from foreman.monitor import CompletionDetector, StuckDetector, watch_done, watch_logs, watch_plans
+from foreman.monitor import StuckDetector, watch_done, watch_logs, watch_plans
 from foreman.plan_parser import InvalidPlanNameError, Plan, load_plans
 from foreman.preflight import check_prerequisites
 from foreman.resolver import CircularDependencyError, UnresolvedDependencyError, validate_dag
@@ -40,24 +40,20 @@ class ForemanLoop:
         )
         self.spawner = Spawner(config)
 
-        self.watchdog = AgentWatchdog(self.db, self.spawner, None, None, config)  # type: ignore[arg-type]
-
         self.stuck = StuckDetector(
             config.timeouts.stuck_threshold,
-            on_stuck=self.watchdog.on_agent_stuck,
-            on_timeout=self.watchdog.on_agent_timeout,
+            on_stuck=self._on_agent_stuck,
+            on_timeout=self._on_agent_timeout,
         )
-        self.completion = CompletionDetector(self.spawner)
 
-        self.watchdog.stuck = self.stuck
-        self.watchdog.completion = self.completion
+        self.watchdog = AgentWatchdog(self.db, self.spawner, self.stuck, config)
 
         self._plans: dict[str, Plan] = {}
         self._innovator_running = False
         self._shutdown = asyncio.Event()
 
         self.scheduler = AgentScheduler(
-            self.db, self.spawner, config, self.stuck, self.completion,
+            self.db, self.spawner, config, self.stuck,
         )
         self.merger = PlanMerger(self.db, self.brain, config)
 
@@ -66,6 +62,12 @@ class ForemanLoop:
         self.watchdog.on_cascade = self.scheduler.cascade_failure
         self.watchdog.on_agent_done = self._dispatch_agent_done
         self.watchdog.on_finish_agent = self.scheduler.finish_agent
+
+    async def _on_agent_stuck(self, plan_name: str) -> None:
+        await self.watchdog.on_agent_stuck(plan_name)
+
+    async def _on_agent_timeout(self, plan_name: str) -> None:
+        await self.watchdog.on_agent_timeout(plan_name)
 
     async def run(self) -> int:
         check_prerequisites()
@@ -90,7 +92,6 @@ class ForemanLoop:
                 tg.create_task(self.watchdog.watchdog_loop(self._shutdown, self.scheduler.schedule_event))
                 tg.create_task(self._innovator_loop())
                 tg.create_task(run_dashboard(self.config, self.db, self._shutdown))
-                tg.create_task(self.completion.poll_loop(self._shutdown))
                 tg.create_task(self._shutdown_waiter())
         except* KeyboardInterrupt:
             pass
@@ -110,7 +111,6 @@ class ForemanLoop:
     async def _graceful_shutdown(self) -> None:
         log.info("Shutting down...")
         self.stuck.cancel_all()
-        self.completion.cancel_all()
 
         for plan_name, agent_id in self.scheduler.active_agent_ids.items():
             self.db.finish_agent(agent_id, exit_code=-1)
@@ -129,7 +129,7 @@ class ForemanLoop:
         self.db.close()
         remove_pid(self.config.repo_root, PID_FILE_FOREMAN)
         await self.spawner.teardown()
-        log.info("Shutdown complete. tmux session left alive for manual inspection.")
+        log.info("Shutdown complete.")
 
     # --- Plan scanning ---
 
@@ -171,13 +171,10 @@ class ForemanLoop:
             branch = plan_data["branch"]
             agent_type = self.db.get_active_agent_type(plan_name)
 
-            if agent_type:
-                terminal = self.spawner.terminal_name(plan_name, agent_type)
-                if await self.spawner.has_window(terminal):
-                    log.info("Plan %s still has live agent in %s, re-registering", plan_name, terminal)
-                    self.stuck.track(plan_name, terminal)
-                    self.completion.track(plan_name, terminal)
-                    continue
+            if agent_type and await self.spawner.is_agent_alive(plan_name, agent_type):
+                log.info("Plan %s still has live agent process, re-registering", plan_name)
+                self.stuck.track(plan_name)
+                continue
 
             if branch and await branch_has_commits(branch, self.config.repo_root):
                 log.info("Plan %s has commits on %s, treating as implementation done", plan_name, branch)
@@ -200,14 +197,7 @@ class ForemanLoop:
 
             elif mask & Mask.MODIFY:
                 status = self.db.get_plan_status(name)
-                if status in (PlanStatus.RUNNING, PlanStatus.REVIEWING):
-                    agent_type = self.db.get_active_agent_type(name) or AgentType.IMPLEMENTATION
-                    log.info("Plan %s modified while %s, notifying %s agent", name, status.value.lower(), agent_type.value)
-                    await self.spawner.notify_agent(
-                        name, agent_type,
-                        f"The plan has been updated. Re-read {file_path} and adapt your approach.",
-                    )
-                else:
+                if status not in (PlanStatus.RUNNING, PlanStatus.REVIEWING):
                     await self._scan_plans()
 
         await watch_plans(self.config.plans_dir, on_plan_event)
@@ -254,7 +244,6 @@ class ForemanLoop:
             self.db.finish_agent(agent_id, exit_code)
 
         self.stuck.cancel(plan_name)
-        self.completion.cancel(plan_name)
 
         sentinel_file = self.config.repo_root / ".foreman" / "done" / sentinel_name
         sentinel_file.unlink(missing_ok=True)

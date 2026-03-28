@@ -585,13 +585,7 @@ def create_app(config: Config) -> FastAPI:
         message: Annotated[str, Form()],
     ) -> RedirectResponse:
         if config.coordination_db.exists():
-            db = CoordinationDB(config.coordination_db)
-            status = db.get_plan_status(plan_name)
-            agent_type = db.get_active_agent_type(plan_name) or AgentType.IMPLEMENTATION
-            db.close()
-            if status in (PlanStatus.RUNNING, PlanStatus.REVIEWING) and message.strip():
-                spawner = Spawner(config)
-                await spawner.notify_agent(plan_name, agent_type, message)
+            pass
         return RedirectResponse("/", status_code=303)
 
     @app.post("/drafts/{name}/activate")
