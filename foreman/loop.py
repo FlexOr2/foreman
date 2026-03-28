@@ -37,6 +37,7 @@ class ForemanLoop:
             allowed_tools=config.allowed_tools.get("brain", "Read,Edit,Bash,Glob,Grep"),
             permission_mode=config.agents.permission_mode,
             timeout=config.timeouts.brain_timeout,
+            claude_bin=config.claude_bin,
         )
         self.spawner = Spawner(config)
 

@@ -15,7 +15,7 @@ MOCK_CLAUDE = Path(__file__).parent / "mock_claude.sh"
 
 
 def _init_repo(path: Path) -> None:
-    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=path, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=path, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=path, check=True, capture_output=True)
     (path / "README.md").write_text("# Test Repo\n")
@@ -98,6 +98,22 @@ class TestSpawnCycle:
         monkeypatch.setattr("foreman.loop.check_prerequisites", lambda: True)
         monkeypatch.setattr("foreman.spawner.Spawner.setup", _mock_spawner_setup)
         monkeypatch.setenv("MOCK_REVIEW_VERDICT", "findings")
+
+        (repo / "plans" / "my-plan.md").write_text("# My Plan\nDo something.\n")
+        config = _make_config(repo)
+
+        async def _run() -> PlanStatus | None:
+            return await _run_until_terminal(ForemanLoop(config), "my-plan", timeout=60.0)
+
+        status = asyncio.run(_run())
+
+        assert status == PlanStatus.DONE
+
+    def test_merge_conflict(self, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(config_module, "CLAUDE_BIN", str(MOCK_CLAUDE))
+        monkeypatch.setattr("foreman.loop.check_prerequisites", lambda: True)
+        monkeypatch.setattr("foreman.spawner.Spawner.setup", _mock_spawner_setup)
+        monkeypatch.setenv("MOCK_MERGE_CONFLICT", "1")
 
         (repo / "plans" / "my-plan.md").write_text("# My Plan\nDo something.\n")
         config = _make_config(repo)

@@ -66,7 +66,7 @@ class InnovateConfig:
 
 @dataclass
 class Config:
-    claude_bin: str = ""  # Overrides the module-level CLAUDE_BIN when non-empty
+    claude_bin: str = ""
     plans_dir: Path = field(default_factory=lambda: Path("plans"))
     prompts_dir: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/prompts"))
     coordination_db: Path = field(default_factory=lambda: Path(f"{FOREMAN_DIR}/coordination.db"))

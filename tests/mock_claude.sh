@@ -17,13 +17,22 @@ fi
 
 case "$AGENT_TYPE" in
     implementation)
-        echo "implemented" > implementation.txt
-        git add implementation.txt
-        git commit -m "implement plan"
+        if [[ "${MOCK_MERGE_CONFLICT:-0}" == "1" ]]; then
+            echo "feature content" > conflict.txt
+            git add conflict.txt
+            git commit -m "implement plan"
+            MAIN_REPO="$(dirname "$(git rev-parse --git-common-dir)")"
+            echo "main content" > "$MAIN_REPO/conflict.txt"
+            git -C "$MAIN_REPO" add conflict.txt
+            git -C "$MAIN_REPO" -c user.email="test@test.com" -c user.name="Test" commit -m "concurrent main change"
+        else
+            echo "implemented" > implementation.txt
+            git add implementation.txt
+            git commit -m "implement plan"
+        fi
         ;;
     review)
         VERDICT="${MOCK_REVIEW_VERDICT:-clean}"
-        # If a fix agent already ran, always approve.
         if [[ -f fix.txt ]]; then
             VERDICT="clean"
         fi
@@ -35,7 +44,11 @@ case "$AGENT_TYPE" in
         git commit -m "fix review findings"
         ;;
     rebase)
-        git rebase origin/main
+        git rebase main || {
+            git checkout --theirs -- .
+            git add -A
+            GIT_EDITOR=: git rebase --continue
+        }
         ;;
 esac
 
