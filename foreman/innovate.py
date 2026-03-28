@@ -31,6 +31,7 @@ class IdeaCategory(StrEnum):
     COMPETITIVE = "competitive"
     DELIGHT = "delight"
     MOONSHOTS = "moonshots"
+    CREATE = "create"
 
 
 QUESTIONS: dict[IdeaCategory, list[str]] = {
@@ -97,10 +98,17 @@ QUESTIONS: dict[IdeaCategory, list[str]] = {
         "What if this app could learn from how each user works and adapt itself?",
         "What's the version of this app that makes its own category — not competing with existing tools but creating a new space?",
     ],
+    IdeaCategory.CREATE: [
+        "What new tool, library, or project would solve a problem you see in this codebase's ecosystem? What's missing from the developer's workflow?",
+        "What tool would you build if you could start from scratch, taking all the lessons learned from this codebase?",
+        "Think beyond this project — what would complement or extend this ecosystem in a genuinely novel way?",
+        "What problem do users of this project frequently run into that a companion tool could solve?",
+    ],
 }
 
 DEFENSIVE_CATEGORIES = {IdeaCategory.RISK, IdeaCategory.PERFORMANCE, IdeaCategory.ARCHITECTURE, IdeaCategory.DEBT, IdeaCategory.DX}
 CREATIVE_CATEGORIES = {IdeaCategory.FEATURES, IdeaCategory.COMPETITIVE, IdeaCategory.DELIGHT, IdeaCategory.MOONSHOTS}
+CREATE_CATEGORIES = {IdeaCategory.CREATE}
 
 
 _DEVIL_PROMPT = """\
@@ -377,6 +385,75 @@ What could go wrong with this change.
 Output ONLY the plan documents separated by ---, nothing else. If you find no actionable improvements, output exactly: NO_FINDINGS"""
 
 
+_CREATE_PLAN_FORMAT = """\
+# Short descriptive project name
+
+## Why It Should Exist
+
+Describe the specific problem it solves and why no existing tool addresses it adequately.
+
+## Tech Stack
+
+List languages, frameworks, and key dependencies with brief justification for each choice.
+
+## File Structure
+
+```
+project-root/
+├── ...
+```
+
+## Implementation Plan
+
+### Phase 1: Core
+- ...
+
+### Phase 2: ...
+- ...
+
+## CLAUDE.md
+
+Provide a complete CLAUDE.md for the new project covering code style, architecture decisions, and what not to do."""
+
+
+def _build_create_prompt(max_ideas: int, web: bool) -> str:
+    questions_block = "\n".join(f"- {q}" for q in QUESTIONS[IdeaCategory.CREATE])
+
+    web_instruction = ""
+    if web:
+        web_instruction = (
+            "\nYou have web search available. Research the existing tool landscape to validate "
+            "that your proposed project fills a genuine gap and doesn't already exist.\n"
+        )
+
+    return f"""\
+You are an autonomous innovation agent. Your job is to discover what entirely new projects should exist to complement or extend this codebase's ecosystem.
+
+## Phase 1: Explore
+Read the codebase structure, dependencies, README, CLAUDE.md, and entry points. Understand what this project does and what problems it solves.
+{web_instruction}
+## Phase 2: Provoke
+Think beyond this codebase. Consider these questions:
+{questions_block}
+
+## Phase 3: Blueprint
+For each new project worth building, write a complete self-contained blueprint that could bootstrap an entirely new repository.
+
+Requirements:
+- Each project must solve a real, demonstrable problem not solved by existing tools
+- The blueprint must be complete enough for an agent to implement from scratch
+- Include a full CLAUDE.md for the new project
+- Generate at most {max_ideas} blueprints
+
+For each new project, output a markdown blueprint using exactly this format, separated by --- on its own line:
+
+{_CREATE_PLAN_FORMAT}
+
+---
+
+Output ONLY the blueprint documents separated by ---, nothing else. If you find no genuinely valuable new project to propose, output exactly: NO_FINDINGS"""
+
+
 def _build_review_input(
     reviewer_name: str,
     reviewer_prompt: str,
@@ -444,17 +521,23 @@ INNOVATOR_MARKER = "<!-- foreman:innovator -->"
 DRAFT_PREFIX = "draft-"
 
 
-def _write_plans(plans_dir: Path, plans: list[tuple[str, str]], *, auto_activate: bool) -> list[Path]:
+def _write_plans(
+    plans_dir: Path,
+    plans: list[tuple[str, str]],
+    *,
+    auto_activate: bool,
+    slug_prefix: str = "",
+) -> list[Path]:
     plans_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
 
     prefix = "" if auto_activate else DRAFT_PREFIX
 
     for slug, content in plans:
-        path = plans_dir / f"{prefix}{slug}.md"
+        path = plans_dir / f"{prefix}{slug_prefix}{slug}.md"
         counter = 1
         while path.exists():
-            path = plans_dir / f"{prefix}{slug}-{counter}.md"
+            path = plans_dir / f"{prefix}{slug_prefix}{slug}-{counter}.md"
             counter += 1
 
         marked_content = f"{INNOVATOR_MARKER}\n{content}\n"
@@ -463,6 +546,32 @@ def _write_plans(plans_dir: Path, plans: list[tuple[str, str]], *, auto_activate
         log.info("Wrote %s plan: %s", "active" if auto_activate else "draft", path.name)
 
     return written
+
+
+async def _review_plans(
+    plans: list[tuple[str, str]],
+    brain: ForemanBrain,
+    config: Config,
+    skip_review: bool,
+    on_review: _ReviewCallback | None,
+    should_stop: Callable[[], bool] | None,
+) -> list[tuple[str, str]]:
+    if skip_review:
+        return plans
+
+    survivors: list[tuple[str, str]] = []
+    for slug, plan_text in plans:
+        if should_stop and should_stop():
+            log.info("Innovator pausing for restart before reviewing %s", slug)
+            break
+        log.info("Reviewing plan: %s", slug)
+        survived, final_text = await adversarial_review(
+            plan_text, config.agents.permission_mode, brain,
+            config.innovate.reviewer_timeout, on_review,
+        )
+        if survived:
+            survivors.append((slug, final_text))
+    return survivors
 
 
 async def innovate(
@@ -478,6 +587,9 @@ async def innovate(
     effective_categories = categories or config.innovate.categories
     effective_max = max_ideas or config.innovate.max_ideas
 
+    create_enabled = IdeaCategory.CREATE.value in effective_categories
+    regular_categories = [c for c in effective_categories if c != IdeaCategory.CREATE.value]
+
     tools = BRAIN_TOOLS_WEB if web else BRAIN_TOOLS
     foreman_dir = config.repo_root / ".foreman"
     foreman_dir.mkdir(parents=True, exist_ok=True)
@@ -488,45 +600,53 @@ async def innovate(
         permission_mode=config.agents.permission_mode,
     )
 
-    prompt = _build_explore_prompt(effective_categories, effective_max, scope_path, web)
-    log.info("Exploring codebase — categories: %s", ", ".join(effective_categories))
+    written: list[Path] = []
 
-    result = await brain.think(prompt)
+    if regular_categories:
+        prompt = _build_explore_prompt(regular_categories, effective_max, scope_path, web)
+        log.info("Exploring codebase — categories: %s", ", ".join(regular_categories))
+        result = await brain.think(prompt)
 
-    if should_stop and should_stop():
-        log.info("Innovator pausing for restart after exploration")
-        return []
-
-    if "NO_FINDINGS" in result:
-        log.info("Exploration complete — no findings")
-        return []
-
-    plans = _parse_draft_plans(result)
-    if not plans:
-        log.warning("Brain returned output but no parseable plans")
-        return []
-
-    plans = plans[:effective_max]
-    log.info("Shaped %d candidate ideas into plans", len(plans))
-
-    if skip_review:
-        return _write_plans(config.plans_dir, plans, auto_activate=config.innovate.auto_activate)
-
-    survivors: list[tuple[str, str]] = []
-    for slug, plan_text in plans:
         if should_stop and should_stop():
-            log.info("Innovator pausing for restart before reviewing %s", slug)
-            break
+            log.info("Innovator pausing for restart after exploration")
+            return written
 
-        log.info("Reviewing plan: %s", slug)
-        survived, final_text = await adversarial_review(
-            plan_text, config.agents.permission_mode, brain,
-            config.innovate.reviewer_timeout, on_review,
-        )
-        if survived:
-            survivors.append((slug, final_text))
+        if "NO_FINDINGS" not in result:
+            plans = _parse_draft_plans(result)[:effective_max]
+            if not plans:
+                log.warning("Brain returned output but no parseable plans")
+            else:
+                log.info("Shaped %d candidate ideas into plans", len(plans))
+                survivors = await _review_plans(plans, brain, config, skip_review, on_review, should_stop)
+                written += _write_plans(config.plans_dir, survivors, auto_activate=config.innovate.auto_activate)
+        else:
+            log.info("Exploration complete — no findings")
 
-    return _write_plans(config.plans_dir, survivors, auto_activate=config.innovate.auto_activate)
+    if create_enabled:
+        if should_stop and should_stop():
+            log.info("Innovator pausing for restart before create exploration")
+            return written
+
+        prompt = _build_create_prompt(effective_max, web)
+        log.info("Exploring new project ideas")
+        result = await brain.think(prompt)
+
+        if should_stop and should_stop():
+            log.info("Innovator pausing for restart after create exploration")
+            return written
+
+        if "NO_FINDINGS" not in result:
+            plans = _parse_draft_plans(result)[:effective_max]
+            if not plans:
+                log.warning("Brain returned output but no parseable create blueprints")
+            else:
+                log.info("Shaped %d new project blueprints", len(plans))
+                survivors = await _review_plans(plans, brain, config, skip_review, on_review, should_stop)
+                written += _write_plans(config.plans_dir, survivors, auto_activate=False, slug_prefix="create-")
+        else:
+            log.info("Create exploration complete — no findings")
+
+    return written
 
 
 async def review_existing_drafts(
