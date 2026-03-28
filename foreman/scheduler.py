@@ -15,7 +15,7 @@ from foreman.monitor import CompletionDetector, StuckDetector
 from foreman.plan_parser import Plan
 from foreman.resolver import get_ready_plans
 from foreman.spawner import Spawner, log_filename
-from foreman.worktree import create_worktree, remove_worktree
+from foreman.worktree import branch_has_commits, create_worktree, remove_worktree
 
 log = logging.getLogger(__name__)
 
@@ -266,6 +266,17 @@ class AgentScheduler:
     async def on_fix_done(self, plan_name: str) -> None:
         self.pending_reviews.add(plan_name)
         self.schedule_event.set()
+
+    async def on_review_failure(self, plan_name: str) -> bool:
+        """Retry the review if implementation commits exist; return True if retried."""
+        plan_data = self.db.get_plan(plan_name)
+        branch = plan_data["branch"] if plan_data else None
+        if branch and await branch_has_commits(branch, self.config.repo_root):
+            self.db.set_plan_status(plan_name, PlanStatus.RUNNING)
+            self.pending_reviews.add(plan_name)
+            self.schedule_event.set()
+            return True
+        return False
 
     def cascade_failure(self, failed_plan: str) -> None:
         failed_status = self.db.get_plan_status(failed_plan)

@@ -260,15 +260,9 @@ class ForemanLoop:
         sentinel_file.unlink(missing_ok=True)
 
         if exit_code != 0:
-            if agent_type == AgentType.REVIEW:
-                plan_data = self.db.get_plan(plan_name)
-                branch = plan_data["branch"] if plan_data else None
-                if branch and await branch_has_commits(branch, self.config.repo_root):
-                    log.warning("Review agent failed for %s (exit %s), retrying review", plan_name, exit_code)
-                    self.db.set_plan_status(plan_name, PlanStatus.RUNNING)
-                    self.scheduler.pending_reviews.add(plan_name)
-                    self.scheduler.schedule_event.set()
-                    return
+            if agent_type == AgentType.REVIEW and await self.scheduler.on_review_failure(plan_name):
+                log.warning("Review agent failed for %s (exit %s), retrying review", plan_name, exit_code)
+                return
             self.db.set_plan_status(plan_name, PlanStatus.FAILED)
             log.error("Agent %s/%s failed (exit code %s)", plan_name, agent_type.value, exit_code)
             self.scheduler.cascade_failure(plan_name)
