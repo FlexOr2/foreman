@@ -31,3 +31,5 @@ Write one of these JSON objects to `REVIEW_VERDICT.json`:
 ## When done
 
 After writing REVIEW_VERDICT.json, run /exit to signal completion.
+
+You have a 15 minute hard timeout. Be thorough but efficient.
