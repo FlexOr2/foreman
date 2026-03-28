@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import sqlite3
 from collections.abc import Callable
@@ -672,7 +673,52 @@ async def _review_plans(
     return survivors
 
 
+def _is_pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 async def innovate(
+    config: Config,
+    categories: list[str] | None = None,
+    max_ideas: int | None = None,
+    web: bool = False,
+    scope_path: str | None = None,
+    skip_review: bool = False,
+    on_review: _ReviewCallback | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> list[Path]:
+    foreman_dir = config.repo_root / ".foreman"
+    lock_path = foreman_dir / "innovator" / "innovate.lock"
+    if lock_path.exists():
+        try:
+            pid = int(lock_path.read_text().strip())
+            if _is_pid_alive(pid):
+                log.info("Another innovate is running (PID %d), skipping", pid)
+                return []
+        except (ValueError, FileNotFoundError):
+            pass
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(str(os.getpid()))
+    try:
+        return await _innovate(
+            config,
+            categories=categories,
+            max_ideas=max_ideas,
+            web=web,
+            scope_path=scope_path,
+            skip_review=skip_review,
+            on_review=on_review,
+            should_stop=should_stop,
+        )
+    finally:
+        lock_path.unlink(missing_ok=True)
+
+
+async def _innovate(
     config: Config,
     categories: list[str] | None = None,
     max_ideas: int | None = None,

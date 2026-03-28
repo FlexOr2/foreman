@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html as _html
 import json
 import logging
@@ -945,6 +946,16 @@ def create_app(config: Config) -> FastAPI:
     return app
 
 
+_innovate_lock = asyncio.Lock()
+
+
 async def _run_innovate_background(config: Config) -> None:
-    from foreman.innovate import innovate
-    await innovate(config)
+    if _innovate_lock.locked():
+        log.info("Innovate already running, skipping")
+        return
+    async with _innovate_lock:
+        try:
+            from foreman.innovate import innovate
+            await innovate(config)
+        except Exception:
+            log.error("Background innovate failed", exc_info=True)
