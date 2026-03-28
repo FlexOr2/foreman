@@ -268,10 +268,8 @@ class AgentScheduler:
         self.schedule_event.set()
 
     async def on_review_failure(self, plan_name: str) -> bool:
-        """Retry the review if implementation commits exist; return True if retried."""
-        plan_data = self.db.get_plan(plan_name)
-        branch = plan_data["branch"] if plan_data else None
-        if branch and await branch_has_commits(branch, self.config.repo_root):
+        branch = self.db.get_plan(plan_name)["branch"]
+        if await branch_has_commits(branch, self.config.repo_root):
             self.db.set_plan_status(plan_name, PlanStatus.RUNNING)
             self.pending_reviews.add(plan_name)
             self.schedule_event.set()
