@@ -42,6 +42,11 @@ class AgentScheduler:
         completed = self.db.get_completed_plan_names()
         running = self.db.get_in_progress_plan_names()
         ready = get_ready_plans(list(self.plans.values()), completed, running)
+        priorities = {
+            r["plan"]: r.get("priority", 0)
+            for r in self.db.get_all_plans()
+        }
+        ready.sort(key=lambda p: priorities.get(p.name, 0), reverse=True)
 
         worker_count = sum(
             1 for name in running
