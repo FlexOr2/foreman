@@ -108,7 +108,7 @@ def _minutes_since(iso_timestamp: str | None) -> float:
 def _start_foreman(repo_root: Path) -> subprocess.Popen:
     devnull = open(os.devnull, "w")
     return subprocess.Popen(
-        [sys.executable, "-m", "foreman.cli", "start"],
+        [sys.executable, "-c", "from foreman.cli import app; app()", "start"],
         cwd=repo_root,
         start_new_session=True,
         stdin=subprocess.PIPE,
