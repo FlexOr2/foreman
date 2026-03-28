@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import logging.handlers
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,7 +15,7 @@ import cyclopts
 from rich.console import Console
 from rich.table import Table
 
-from foreman.config import RESTART_EXIT_CODE, load_config
+from foreman.config import FOREMAN_DIR, RESTART_EXIT_CODE, load_config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.dashboard import STATUS_STYLES
 from foreman.loop import ForemanLoop
@@ -70,6 +71,16 @@ def _setup_logging(debug: bool = False, log_file: Path | None = None) -> None:
         handler.setLevel(level)
         handler.setFormatter(_JSONFormatter())
         logging.getLogger().addHandler(handler)
+
+
+def _spawn_observer(repo_root: Path) -> None:
+    import subprocess
+    subprocess.Popen(
+        [sys.executable, "-m", "foreman.observer", str(repo_root)],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 @app.command
@@ -157,6 +168,14 @@ def start(
     if not config.plans_dir.exists():
         console.print(f"[yellow]No plans directory found.[/yellow] Run 'foreman init' first.")
         sys.exit(1)
+
+    from foreman.observer import PID_FILE_OBSERVER, is_process_running
+
+    if not is_process_running(config.repo_root, PID_FILE_OBSERVER):
+        _spawn_observer(config.repo_root)
+        console.print("  Observer: [green]spawned[/green]")
+    else:
+        console.print("  Observer: already running")
 
     console.print(f"[bold]Foreman[/bold] starting in {config.repo_root}")
     console.print(f"  Plans dir: {config.plans_dir}")
@@ -609,3 +628,41 @@ def reset(repo: Path = Path(".")) -> None:
     log.info("Reset complete")
 
     console.print("[green]Reset complete.[/green]")
+
+
+@app.command
+def stop(repo: Path = Path(".")) -> None:
+    """Stop foreman and the observer."""
+    import signal
+
+    from foreman.observer import (
+        PID_FILE_FOREMAN,
+        PID_FILE_OBSERVER,
+        is_pid_alive,
+        read_pid,
+        remove_pid,
+    )
+
+    config = load_config(repo.resolve())
+
+    for name, label in [(PID_FILE_FOREMAN, "Foreman"), (PID_FILE_OBSERVER, "Observer")]:
+        pid = read_pid(config.repo_root, name)
+        if pid and is_pid_alive(pid):
+            os.kill(pid, signal.SIGTERM)
+            console.print(f"  {label}: [red]stopped[/red] (PID {pid})")
+        else:
+            console.print(f"  {label}: not running")
+        remove_pid(config.repo_root, name)
+
+    console.print("[green]Stopped.[/green]")
+
+
+@app.command
+def observer(repo: Path = Path("."), debug: bool = False) -> None:
+    """Run the observer standalone (for debugging)."""
+    from foreman.observer import run
+
+    config = load_config(repo.resolve())
+    _setup_logging(debug, log_file=config.log_file)
+    console.print(f"[bold]Observer[/bold] running in {config.repo_root}")
+    run(config.repo_root)
