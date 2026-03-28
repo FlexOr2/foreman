@@ -157,6 +157,11 @@ class ForemanLoop:
                 self.db.upsert_plan(plan.name, PlanStatus.QUEUED)
                 log.info("New plan detected: %s", plan.name)
 
+        for plan_name, plan_data in known_plans.items():
+            if plan_data["status"] == PlanStatus.QUEUED and plan_name not in self._plans:
+                self.db.set_plan_status(plan_name, PlanStatus.FAILED, reason="Plan file removed")
+                log.info("Marked %s as FAILED — plan file no longer exists", plan_name)
+
     async def _recover_running_plans(self) -> None:
         interrupted = (
             self.db.get_plans_by_status(PlanStatus.RUNNING)
@@ -201,6 +206,10 @@ class ForemanLoop:
                     log.info("New plan file: %s", file_path.name)
                     await self._scan_plans()
                     self.scheduler.schedule_event.set()
+
+                elif mask & Mask.DELETE:
+                    log.info("Plan file removed: %s", file_path.name)
+                    await self._scan_plans()
 
                 elif mask & Mask.MODIFY:
                     status = self.db.get_plan_status(name)
