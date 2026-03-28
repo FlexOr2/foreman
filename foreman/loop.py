@@ -174,6 +174,10 @@ class ForemanLoop:
             if agent_type and await self.spawner.is_agent_alive(plan_name, agent_type):
                 log.info("Plan %s still has live agent process, re-registering", plan_name)
                 self.stuck.track(plan_name)
+                agents = self.db.get_agents_for_plan(plan_name)
+                active = [a for a in agents if a["finished_at"] is None]
+                if active:
+                    self.scheduler.active_agent_ids[plan_name] = active[-1]["id"]
                 continue
 
             if branch and await branch_has_commits(branch, self.config.repo_root):
