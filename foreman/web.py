@@ -696,33 +696,19 @@ def create_app(config: Config) -> FastAPI:
     async def resume_plan(plan_name: str) -> RedirectResponse:
         if not is_valid_plan_name(plan_name):
             return RedirectResponse("/", status_code=303)
+        if not config.coordination_db.exists():
+            return RedirectResponse("/", status_code=303)
         db = CoordinationDB(config.coordination_db)
-        plan_data = db.get_plan(plan_name)
-        db.close()
-        if not plan_data or PlanStatus(plan_data["status"]) != PlanStatus.INTERRUPTED:
-            return RedirectResponse("/", status_code=303)
-        worktree_path = plan_data.get("worktree_path")
-        branch = plan_data.get("branch")
-        if not worktree_path or not Path(worktree_path).exists():
-            return RedirectResponse("/", status_code=303)
-        from foreman.plan_parser import load_plans
-        plans = {p.name: p for p in load_plans(config.plans_dir)}
-        plan_obj = plans.get(plan_name)
-        if not plan_obj:
-            return RedirectResponse("/", status_code=303)
-        plan_file = plan_obj.file_path.resolve()
-        msg = (
-            f"You are resuming work on this plan. "
-            f"Read the plan at {plan_file} and review what has already been done on branch {branch}. "
-            f"Continue where the previous agent left off. Commit all changes when done."
-        )
-        spawner = Spawner(config)
-        await spawner.setup()
-        pid = await spawner.spawn_agent(plan_obj, Path(worktree_path), AgentType.IMPLEMENTATION, msg)
-        db2 = CoordinationDB(config.coordination_db)
-        db2.set_plan_status(plan_name, PlanStatus.RUNNING)
-        db2.add_agent(plan_name, AgentType.IMPLEMENTATION, pid=pid)
-        db2.close()
+        try:
+            plan_data = db.get_plan(plan_name)
+            if not plan_data or PlanStatus(plan_data["status"]) != PlanStatus.INTERRUPTED:
+                return RedirectResponse("/", status_code=303)
+            db.set_plan_status(plan_name, PlanStatus.QUEUED)
+        finally:
+            db.close()
+        plan_file = config.plans_dir / f"{plan_name}.md"
+        if plan_file.exists():
+            plan_file.touch()
         return RedirectResponse("/", status_code=303)
 
     @app.post("/plans/{plan_name}/kill")
