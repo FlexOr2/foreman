@@ -204,8 +204,13 @@ def _build_launcher_script(
     done_dir = (config.repo_root / ".foreman" / "done").resolve()
     tools = config.allowed_tools.get(agent_type, "")
 
+    sentinel_name = f"{plan.name}{AGENT_TYPE_SEP}{agent_type.value}"
+    sentinel_path = shlex.quote(str(done_dir / sentinel_name))
+
     lines = [
         "#!/bin/bash",
+        "_ec=1",
+        f"trap 'echo \"$_ec\" > {sentinel_path}.tmp && mv {sentinel_path}.tmp {sentinel_path}' EXIT",
         f"cd {shlex.quote(str(worktree_path.resolve()))}",
     ]
 
@@ -225,9 +230,7 @@ def _build_launcher_script(
         cmd_parts.append(f"  --allowed-tools {shlex.quote(tools)}")
 
     lines.append(" \\\n".join(cmd_parts))
-    sentinel_name = f"{plan.name}{AGENT_TYPE_SEP}{agent_type.value}"
-    sentinel_path = shlex.quote(str(done_dir / sentinel_name))
-    lines.append(f"_ec=$?; echo $_ec > {sentinel_path}.tmp && mv {sentinel_path}.tmp {sentinel_path}")
+    lines.append("_ec=$?")
     return "\n".join(lines) + "\n"
 
 
