@@ -289,7 +289,7 @@ class Spawner:
     async def send_command(self, terminal: str, text: str) -> None:
         await self.backend.send_text(terminal, text)
 
-    async def _wait_for_ready(self, terminal: str, timeout: int = 60) -> None:
+    async def _wait_for_ready(self, terminal: str, timeout: int = 180) -> None:
         for _ in range(timeout):
             pane_content = await self.backend.capture_output(terminal)
             if pane_content and "\u276f" in pane_content:
