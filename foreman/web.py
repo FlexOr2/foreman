@@ -335,13 +335,19 @@ def _render_logs(config: Config, n: int = 25) -> str:
     if not config.log_file.exists():
         return '<div class="card"><div class="empty">No log file yet.</div></div>'
 
-    lines_raw = config.log_file.read_text(encoding="utf-8").splitlines()
+    tail_bytes = 65536
+    with open(config.log_file, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - tail_bytes))
+        tail = f.read().decode("utf-8", errors="replace")
+
     entries = []
-    for raw in reversed(lines_raw):
-        if not raw.strip():
+    for line in reversed(tail.splitlines()):
+        if not line.strip():
             continue
         try:
-            e = json.loads(raw)
+            e = json.loads(line)
         except json.JSONDecodeError:
             continue
         if e.get("level") in ("ERROR", "WARNING"):
