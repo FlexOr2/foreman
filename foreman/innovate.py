@@ -441,13 +441,14 @@ async def adversarial_review(
 
 
 INNOVATOR_MARKER = "<!-- foreman:innovator -->"
+DRAFT_PREFIX = "draft-"
 
 
 def _write_plans(plans_dir: Path, plans: list[tuple[str, str]], *, auto_activate: bool) -> list[Path]:
     plans_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
 
-    prefix = "" if auto_activate else "draft-"
+    prefix = "" if auto_activate else DRAFT_PREFIX
 
     for slug, content in plans:
         path = plans_dir / f"{prefix}{slug}.md"
