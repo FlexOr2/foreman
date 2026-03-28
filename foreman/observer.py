@@ -115,7 +115,7 @@ async def _handle_orphaned_plan(db: CoordinationDB, plan: dict, config) -> None:
     branch = plan.get("branch")
 
     if branch and await branch_has_commits(branch, config.repo_root):
-        success, _ = await merge_branch(branch, config.repo_root)
+        success, _, _ = await merge_branch(branch, config.repo_root)
         if success:
             db.set_plan_status(plan_name, PlanStatus.DONE)
             plan_file = config.plans_dir / f"{plan_name}.md"
