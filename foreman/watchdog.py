@@ -43,6 +43,7 @@ class AgentWatchdog:
             self.db.set_blocked_reason(plan_name, None)
 
     async def watchdog_loop(self, shutdown: asyncio.Event, schedule_event: asyncio.Event) -> None:
+        self._schedule_event = schedule_event
         while not shutdown.is_set():
             try:
                 await asyncio.wait_for(shutdown.wait(), timeout=WATCHDOG_INTERVAL)
@@ -187,3 +188,5 @@ class AgentWatchdog:
         self.db.set_plan_status(plan_name, PlanStatus.FAILED, reason="Agent exceeded hard timeout")
         if self.on_cascade:
             self.on_cascade(plan_name)
+        if hasattr(self, '_schedule_event'):
+            self._schedule_event.set()
