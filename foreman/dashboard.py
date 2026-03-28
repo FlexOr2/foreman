@@ -16,7 +16,6 @@ from rich.text import Text
 
 from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
-from foreman.innovate import INNOVATOR_MARKER
 
 REFRESH_INTERVAL = 2
 INNOVATOR_LOG_LINES = 10
@@ -68,10 +67,7 @@ def _time_ago(iso_str: str | None) -> str:
 def _innovator_status(config: Config) -> str:
     if not config.innovate.enabled:
         return "disabled"
-    plan_count = sum(
-        1 for f in config.plans_dir.glob("*.md")
-        if INNOVATOR_MARKER in f.read_text(encoding="utf-8")[:100]
-    )
+    plan_count = sum(1 for _ in config.plans_dir.glob("draft-*.md"))
     if plan_count >= config.innovate.max_drafts:
         return f"paused ({plan_count}/{config.innovate.max_drafts} drafts)"
     return f"running ({plan_count}/{config.innovate.max_drafts} drafts)"
