@@ -59,7 +59,7 @@ class StuckDetector:
     def _fire_stuck(self, plan_name: str) -> None:
         if plan_name not in self._active_plans:
             return
-        log.warning("Agent %s appears stuck (no log activity for %ds)", plan_name, self.threshold)
+        log.warning("Agent %s appears stuck (no log activity for %ds)", plan_name, self.threshold, extra={"plan": plan_name})
         self._get_loop().create_task(self._on_stuck(plan_name))
 
     def track_timeout(self, plan_name: str, timeout_seconds: int) -> None:
@@ -75,7 +75,7 @@ class StuckDetector:
             return
         if not self._on_timeout:
             return
-        log.warning("Agent %s hit hard timeout", plan_name)
+        log.warning("Agent %s hit hard timeout", plan_name, extra={"plan": plan_name})
         self._get_loop().create_task(self._on_timeout(plan_name))
 
     def cancel(self, plan_name: str) -> None:
