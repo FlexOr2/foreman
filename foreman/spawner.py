@@ -63,7 +63,7 @@ def _build_launcher_script(
     ]
 
     cmd_parts = [
-        _config.CLAUDE_BIN,
+        config.claude_bin or _config.CLAUDE_BIN,
         f"  -p {shlex.quote(initial_message)}",
         "  --output-format json",
         f'  --append-system-prompt "$(cat {shlex.quote(str(prompt_path))})"',

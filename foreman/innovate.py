@@ -281,9 +281,9 @@ def _parse_draft_plans(brain_output: str) -> list[tuple[str, str]]:
     return plans
 
 
-async def _invoke_reviewer(prompt: str, permission_mode: str, timeout: int) -> str:
+async def _invoke_reviewer(prompt: str, permission_mode: str, timeout: int, claude_bin: str = "") -> str:
     cmd = [
-        _config.CLAUDE_BIN, "-p", prompt,
+        claude_bin or _config.CLAUDE_BIN, "-p", prompt,
         "--output-format", "json",
         "--permission-mode", permission_mode,
         "--allowed-tools", "",
@@ -577,6 +577,7 @@ async def adversarial_review(
     brain: ForemanBrain,
     reviewer_timeout: int,
     on_review: _ReviewCallback | None = None,
+    claude_bin: str = "",
 ) -> tuple[bool, str]:
     feedback_history: list[tuple[str, str]] = []
 
@@ -585,7 +586,7 @@ async def adversarial_review(
 
         log.info("Review round %d/%d (%s)", round_num, len(REVIEWERS), reviewer_name)
         try:
-            result_text = await _invoke_reviewer(review_input, permission_mode, reviewer_timeout)
+            result_text = await _invoke_reviewer(review_input, permission_mode, reviewer_timeout, claude_bin=claude_bin)
         except asyncio.TimeoutError:
             verdict = ReviewResult(action=Verdict.KILL, reason=f"timed out after {reviewer_timeout}s", demands=[])
             if on_review:
@@ -667,6 +668,7 @@ async def _review_plans(
         survived, final_text = await adversarial_review(
             plan_text, config.agents.permission_mode, brain,
             config.innovate.reviewer_timeout, on_review,
+            claude_bin=config.claude_bin,
         )
         if survived:
             survivors.append((slug, final_text))
@@ -742,6 +744,7 @@ async def _innovate(
         foreman_dir=foreman_dir / "innovator",
         allowed_tools=tools,
         permission_mode=config.agents.permission_mode,
+        claude_bin=config.claude_bin,
     )
 
     written: list[Path] = []
@@ -934,6 +937,7 @@ async def run_cleanup_cycle(
         foreman_dir=foreman_dir / "innovator",
         allowed_tools=BRAIN_TOOLS,
         permission_mode=config.agents.permission_mode,
+        claude_bin=config.claude_bin,
     )
 
     log.info("Running cleanup cycle")
@@ -968,6 +972,7 @@ async def run_test_cycle(
         foreman_dir=foreman_dir / "innovator",
         allowed_tools=BRAIN_TOOLS,
         permission_mode=config.agents.permission_mode,
+        claude_bin=config.claude_bin,
     )
 
     log.info("Running test generation cycle")
@@ -1002,6 +1007,7 @@ async def review_existing_drafts(
         foreman_dir=foreman_dir / "innovator",
         allowed_tools=BRAIN_TOOLS,
         permission_mode=config.agents.permission_mode,
+        claude_bin=config.claude_bin,
     )
 
     draft_files = sorted(
@@ -1021,6 +1027,7 @@ async def review_existing_drafts(
         survived, final_text = await adversarial_review(
             plan_text, config.agents.permission_mode, brain,
             config.innovate.reviewer_timeout, on_review,
+            claude_bin=config.claude_bin,
         )
 
         if survived:

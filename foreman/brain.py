@@ -23,12 +23,13 @@ def _read_file_or_none(path: Path) -> str | None:
 
 
 class ForemanBrain:
-    def __init__(self, foreman_dir: Path, allowed_tools: str, permission_mode: str, timeout: int = 900) -> None:
+    def __init__(self, foreman_dir: Path, allowed_tools: str, permission_mode: str, timeout: int = 900, claude_bin: str = "") -> None:
         self._session_file = foreman_dir / "session_id"
         self._context_file = foreman_dir / "context.md"
         self._allowed_tools = allowed_tools
         self._permission_mode = permission_mode
         self._timeout = timeout
+        self._claude_bin = claude_bin
         self._lock = asyncio.Lock()
         self.session_id: str | None = _read_file_or_none(self._session_file)
         if self.session_id:
@@ -56,7 +57,7 @@ class ForemanBrain:
 
     async def _invoke(self, prompt: str) -> str:
         cmd = [
-            _config.CLAUDE_BIN, "-p", prompt,
+            self._claude_bin or _config.CLAUDE_BIN, "-p", prompt,
             "--output-format", "json",
             "--allowed-tools", self._allowed_tools,
             "--permission-mode", self._permission_mode,
