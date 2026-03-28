@@ -123,7 +123,7 @@ class TmuxBackend(Backend):
 
     async def has_terminal(self, name: str) -> bool:
         proc = await asyncio.create_subprocess_exec(
-            "tmux", "has-window", "-t", f"{TMUX_SESSION}:{name}",
+            "tmux", "display-message", "-t", f"{TMUX_SESSION}:{name}", "-p", "",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
