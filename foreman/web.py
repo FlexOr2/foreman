@@ -13,7 +13,7 @@ from typing import Annotated
 from fastapi import BackgroundTasks, FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from foreman.config import Config
+from foreman.config import ALL_IDEA_CATEGORIES, FOREMAN_DIR, Config, RELOAD_CONFIG_MARKER, save_config
 from foreman.plan_parser import is_valid_plan_name
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.innovate import INNOVATOR_MARKER
@@ -130,6 +130,19 @@ textarea, input[type=text] {
 .file-body { padding: 14px; max-height: 65vh; overflow-y: auto; }
 pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 12px; line-height: 1.6; }
 .innovate-running { font-size: 11px; color: #bb9af7; padding: 4px 10px; }
+input[type=number], select {
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); padding: 5px 8px; border-radius: 3px;
+  font-family: inherit; font-size: 12px;
+}
+.cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.cfg-title { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; font-weight: bold; }
+.cfg-field { margin-bottom: 10px; }
+.cfg-field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.cfg-field input[type=number], .cfg-field select { width: 100%; }
+.check-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; cursor: pointer; }
+.check-row input[type=checkbox] { accent-color: var(--accent); width: 13px; height: 13px; cursor: pointer; }
+.cat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
 .resume-option { display: block; width: 100%; text-align: left; padding: 8px 12px; margin-bottom: 6px; }
 .resume-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
 """
@@ -371,6 +384,77 @@ def _render_git_log(config: Config, n: int = 15) -> str:
     return f'<div class="card">{"".join(rows)}</div>'
 
 
+def _render_config_dialog(config: Config) -> str:
+    def checked(val: bool) -> str:
+        return " checked" if val else ""
+
+    model_options = "".join(
+        f'<option value="{m}"{"  selected" if config.agents.model == m else ""}>{m}</option>'
+        for m in ("opus", "sonnet", "haiku")
+    )
+
+    cat_checkboxes = "".join(
+        f'<label class="check-row">'
+        f'<input type="checkbox" name="categories" value="{_h(c)}"'
+        f'{checked(c in config.innovate.categories)}>'
+        f'{_h(c)}</label>'
+        for c in ALL_IDEA_CATEGORIES
+    )
+
+    return (
+        '<dialog id="config-dialog" style="min-width:560px;max-width:90vw;max-height:85vh;overflow-y:auto">'
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
+        '<span style="font-weight:bold;font-size:13px">Settings</span>'
+        '<button type="button" class="btn" onclick="document.getElementById(\'config-dialog\').close()">&#x2715;</button>'
+        '</div>'
+        '<form method="post" action="/config">'
+        '<div class="cfg-grid">'
+        '<div>'
+        '<div class="cfg-title">Agents</div>'
+        f'<div class="cfg-field"><label>Max workers</label>'
+        f'<input type="number" name="max_parallel_workers" value="{config.agents.max_parallel_workers}" min="1" max="20"></div>'
+        f'<div class="cfg-field"><label>Max reviews</label>'
+        f'<input type="number" name="max_parallel_reviews" value="{config.agents.max_parallel_reviews}" min="1" max="20"></div>'
+        f'<div class="cfg-field"><label>Model</label>'
+        f'<select name="model">{model_options}</select></div>'
+        '<div class="cfg-title" style="margin-top:14px">General</div>'
+        f'<label class="check-row"><input type="checkbox" name="auto_restart" value="1"{checked(config.auto_restart)}>Auto restart</label>'
+        '</div>'
+        '<div>'
+        '<div class="cfg-title">Timeouts (seconds)</div>'
+        f'<div class="cfg-field"><label>Implementation</label>'
+        f'<input type="number" name="implementation_timeout" value="{config.timeouts.implementation}" min="60"></div>'
+        f'<div class="cfg-field"><label>Review</label>'
+        f'<input type="number" name="review_timeout" value="{config.timeouts.review}" min="60"></div>'
+        f'<div class="cfg-field"><label>Stuck threshold</label>'
+        f'<input type="number" name="stuck_threshold" value="{config.timeouts.stuck_threshold}" min="60"></div>'
+        '</div>'
+        '</div>'
+        '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">'
+        '<div class="cfg-title">Innovator</div>'
+        '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:10px">'
+        f'<label class="check-row"><input type="checkbox" name="innovate_enabled" value="1"{checked(config.innovate.enabled)}>Enabled</label>'
+        f'<label class="check-row"><input type="checkbox" name="auto_activate" value="1"{checked(config.innovate.auto_activate)}>Auto activate</label>'
+        f'<label class="check-row"><input type="checkbox" name="skip_review" value="1"{checked(config.innovate.skip_review)}>Skip review</label>'
+        '</div>'
+        '<div class="cfg-grid" style="margin-bottom:10px">'
+        f'<div class="cfg-field"><label>Interval (seconds)</label>'
+        f'<input type="number" name="innovate_interval" value="{config.innovate.interval}" min="60"></div>'
+        f'<div class="cfg-field"><label>Max drafts</label>'
+        f'<input type="number" name="innovate_max_drafts" value="{config.innovate.max_drafts}" min="1"></div>'
+        '</div>'
+        '<div class="cfg-title">Categories</div>'
+        f'<div class="cat-grid">{cat_checkboxes}</div>'
+        '</div>'
+        '<div class="dialog-actions" style="margin-top:16px">'
+        '<button type="button" class="btn" onclick="document.getElementById(\'config-dialog\').close()">Cancel</button>'
+        '<button type="submit" class="btn btn-blue">Save</button>'
+        '</div>'
+        '</form>'
+        '</dialog>'
+    )
+
+
 def _render_header(config: Config, db: CoordinationDB | None) -> str:
     foreman_alive = is_process_running(config.repo_root, PID_FILE_FOREMAN)
     observer_alive = is_process_running(config.repo_root, PID_FILE_OBSERVER)
@@ -401,6 +485,7 @@ def _render_header(config: Config, db: CoordinationDB | None) -> str:
         f'{draft_note}'
         f'<form method="post" action="/innovate" style="display:inline">'
         f'<button type="submit" class="btn btn-purple">⚡ Innovate</button></form>'
+        f'<button class="btn" onclick="document.getElementById(\'config-dialog\').showModal()">Config</button>'
         f'</div>'
         f'</header>'
     )
@@ -532,6 +617,7 @@ def _page(config: Config) -> str:
   <div id="file-body" class="file-body"></div>
 </dialog>
 
+{_render_config_dialog(config)}
 <script>{_JS}</script>
 </body>
 </html>"""
@@ -751,6 +837,41 @@ def create_app(config: Config) -> FastAPI:
     @app.post("/innovate")
     async def trigger_innovate(background_tasks: BackgroundTasks) -> RedirectResponse:
         background_tasks.add_task(_run_innovate_background, config)
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/config")
+    async def update_config(
+        max_parallel_workers: Annotated[int, Form()],
+        max_parallel_reviews: Annotated[int, Form()],
+        model: Annotated[str, Form()],
+        implementation_timeout: Annotated[int, Form()],
+        review_timeout: Annotated[int, Form()],
+        stuck_threshold: Annotated[int, Form()],
+        innovate_interval: Annotated[int, Form()],
+        innovate_max_drafts: Annotated[int, Form()],
+        auto_restart: Annotated[str | None, Form()] = None,
+        innovate_enabled: Annotated[str | None, Form()] = None,
+        auto_activate: Annotated[str | None, Form()] = None,
+        skip_review: Annotated[str | None, Form()] = None,
+        categories: Annotated[list[str] | None, Form()] = None,
+    ) -> RedirectResponse:
+        config.agents.max_parallel_workers = max(1, max_parallel_workers)
+        config.agents.max_parallel_reviews = max(1, max_parallel_reviews)
+        if model in ("opus", "sonnet", "haiku"):
+            config.agents.model = model
+        config.timeouts.implementation = max(60, implementation_timeout)
+        config.timeouts.review = max(60, review_timeout)
+        config.timeouts.stuck_threshold = max(60, stuck_threshold)
+        config.auto_restart = auto_restart is not None
+        config.innovate.enabled = innovate_enabled is not None
+        config.innovate.auto_activate = auto_activate is not None
+        config.innovate.skip_review = skip_review is not None
+        config.innovate.interval = max(60, innovate_interval)
+        config.innovate.max_drafts = max(1, innovate_max_drafts)
+        config.innovate.categories = [c for c in (categories or []) if c in ALL_IDEA_CATEGORIES]
+        save_config(config)
+        (config.repo_root / RELOAD_CONFIG_MARKER).write_text("")
+        log.info("Config saved via web UI")
         return RedirectResponse("/", status_code=303)
 
     return app

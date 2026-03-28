@@ -10,7 +10,7 @@ from pathlib import Path
 from asyncinotify import Mask
 
 from foreman.brain import ForemanBrain
-from foreman.config import RESTART_EXIT_CODE, Config
+from foreman.config import RELOAD_CONFIG_MARKER, RESTART_EXIT_CODE, Config, apply_config_update, load_config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.dashboard import run_dashboard
 from foreman.innovate import innovate
@@ -91,6 +91,7 @@ class ForemanLoop:
                 tg.create_task(self._scheduler_loop())
                 tg.create_task(self.watchdog.watchdog_loop(self._shutdown, self.scheduler.schedule_event))
                 tg.create_task(self._innovator_loop())
+                tg.create_task(self._config_reload_loop())
                 tg.create_task(run_dashboard(self.config, self.db, self._shutdown))
                 tg.create_task(self._shutdown_waiter())
         except* KeyboardInterrupt:
@@ -334,6 +335,24 @@ class ForemanLoop:
                         self.scheduler.schedule_event.set()
 
             await self._wait_for_interval(self.config.innovate.interval)
+
+    async def _config_reload_loop(self) -> None:
+        marker = self.config.repo_root / RELOAD_CONFIG_MARKER
+        while not self._shutdown.is_set():
+            try:
+                await asyncio.wait_for(self._shutdown.wait(), timeout=5)
+                return
+            except asyncio.TimeoutError:
+                pass
+            if marker.exists():
+                try:
+                    marker.unlink()
+                    updated = load_config(self.config.repo_root)
+                    apply_config_update(self.config, updated)
+                    log.info("Config reloaded from disk")
+                    self.scheduler.schedule_event.set()
+                except Exception:
+                    log.warning("Failed to reload config", exc_info=True)
 
     async def _wait_for_interval(self, seconds: int) -> None:
         try:
