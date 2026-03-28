@@ -286,9 +286,19 @@ class AgentScheduler:
             return
 
         worktree_path = Path(plan_data["worktree_path"])
+        plan_file = plan.file_path.resolve()
+        plan_summary = ""
+        try:
+            plan_summary = plan.file_path.read_text()[:500]
+        except FileNotFoundError:
+            pass
+
         initial_message = (
-            "Rebase this branch onto main and resolve all conflicts. "
-            "Run tests after resolving. Commit the resolved state."
+            f"Rebase this branch onto main and resolve all conflicts. "
+            f"The original plan is at {plan_file}. "
+            f"Summary of what this branch implements: {plan_summary} "
+            f"Preserve the intent of these changes when resolving conflicts. "
+            f"Run tests after resolving. Commit the resolved state."
         )
 
         pid = await self.spawner.spawn_agent(
