@@ -29,7 +29,7 @@ app = cyclopts.App(
     name="foreman",
     help="AI agent orchestrator for parallel Claude Code execution.",
 )
-console = Console()
+console = Console(stderr=True, force_terminal=False)
 log = logging.getLogger(__name__)
 
 
