@@ -70,6 +70,18 @@ class AgentScheduler:
                 break
             reviewing_count += 1
 
+    async def drain_pending_reviews(self) -> None:
+        reviewing_count = len(self.db.get_plans_by_status(PlanStatus.REVIEWING))
+        while self.pending_reviews and reviewing_count < self.config.agents.max_parallel_reviews:
+            plan_name = self.pending_reviews.pop()
+            try:
+                await self.spawn_review(plan_name)
+            except Exception:
+                log.error("Failed to spawn review for %s", plan_name, exc_info=True)
+                self.pending_reviews.add(plan_name)
+                break
+            reviewing_count += 1
+
     async def spawn_implementation(self, plan: Plan) -> None:
         log.info("Spawning implementation agent for %s", plan.name)
 

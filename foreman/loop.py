@@ -286,6 +286,7 @@ class ForemanLoop:
         while not self._shutdown.is_set():
             self.scheduler.schedule_event.clear()
             if self.merger.restart_pending:
+                await self.scheduler.drain_pending_reviews()
                 await self.watchdog.try_restart(
                     self.scheduler.pending_reviews,
                     self._innovator_running,
