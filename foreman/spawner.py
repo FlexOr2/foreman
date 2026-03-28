@@ -76,7 +76,13 @@ def _build_launcher_script(
     if tools:
         cmd_parts.append(f"  --allowed-tools {shlex.quote(tools)}")
 
-    lines.append(" \\\n".join(cmd_parts) + f" 2>> {log_path}")
+    lines.append(" \\\n".join(cmd_parts) + f" 2>> {log_path} &")
+    lines.append("CLAUDE_PID=$!")
+    lines.append(f"while kill -0 $CLAUDE_PID 2>/dev/null; do")
+    lines.append(f'    echo "[heartbeat $(date -Iseconds)]" >> {log_path}')
+    lines.append(f"    sleep {_config.HEARTBEAT_INTERVAL}")
+    lines.append("done")
+    lines.append("wait $CLAUDE_PID")
     lines.append("_ec=$?")
     return "\n".join(lines) + "\n"
 
