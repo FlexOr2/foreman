@@ -100,6 +100,12 @@ class AgentWatchdog:
         if reconciled:
             schedule_event.set()
 
+        for plan_data in self.db.get_plans_by_status(PlanStatus.INTERRUPTED):
+            plan_name = plan_data["plan"]
+            if plan_name in self.stuck._active_plans:
+                self.stuck.cancel(plan_name)
+                log.info("Cancelled monitoring for externally paused plan %s", plan_name, extra={"plan": plan_name})
+
     async def try_restart(
         self,
         innovator_running: bool,
