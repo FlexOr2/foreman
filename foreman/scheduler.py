@@ -90,6 +90,10 @@ class AgentScheduler:
     async def spawn_implementation(self, plan: Plan) -> None:
         log.info("Spawning implementation agent for %s", plan.name)
 
+        if (self.config.worktree_dir / plan.name).exists():
+            log.info("Removing stale worktree for %s before fresh spawn", plan.name)
+            await remove_worktree(plan.name, self.config)
+
         worktree_path, branch = await create_worktree(plan.name, self.config)
 
         plan_file = plan.file_path.resolve()
