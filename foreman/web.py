@@ -491,6 +491,7 @@ def _render_header(config: Config, db: CoordinationDB | None) -> str:
     draft_note = f' <span class="dim">({draft_count} draft{"s" if draft_count != 1 else ""})</span>' if draft_count else ""
 
     return (
+        f'<div id="header-content" hx-get="/header" hx-trigger="every 3s" hx-swap="outerHTML">'
         f'<header>'
         f'<span class="logo">FOREMAN</span>'
         f'<div class="header-meta">'
@@ -504,6 +505,7 @@ def _render_header(config: Config, db: CoordinationDB | None) -> str:
         f'<button class="btn" onclick="document.getElementById(\'config-dialog\').showModal()">Config</button>'
         f'</div>'
         f'</header>'
+        f'</div>'
     )
 
 
@@ -649,6 +651,15 @@ def create_app(config: Config) -> FastAPI:
     @app.get("/state", response_class=HTMLResponse)
     async def state() -> str:
         return _render_main(config)
+
+    @app.get("/header", response_class=HTMLResponse)
+    async def header() -> str:
+        db = CoordinationDB(config.coordination_db) if config.coordination_db.exists() else None
+        try:
+            return _render_header(config, db)
+        finally:
+            if db:
+                db.close()
 
     @app.get("/plans/{plan_name}/file-content", response_class=HTMLResponse)
     async def plan_file_content(plan_name: str) -> str:
