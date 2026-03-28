@@ -110,32 +110,22 @@ class AgentWatchdog:
 
     async def try_restart(
         self,
-        pending_reviews: set[str],
         innovator_running: bool,
         request_shutdown: Callable[[], None],
     ) -> None:
         active = self.db.get_active_plan_names()
         if active:
-            truly_active = False
             for plan_name in active:
                 agent_type = self.db.get_active_agent_type(plan_name)
                 if agent_type and await self.spawner.is_agent_alive(plan_name, agent_type):
-                    truly_active = True
-                    break
-            if truly_active:
-                log.info("Restart pending — waiting for %d active agents to finish", len(active))
-                return
-            log.info("All agent processes gone — proceeding with restart")
-
-        if pending_reviews:
-            log.info("Restart pending — waiting for %d pending reviews", len(pending_reviews))
-            return
+                    log.info("Restart pending — waiting for %d active agents to finish", len(active))
+                    return
 
         if innovator_running:
             log.info("Restart pending — waiting for innovator to finish current phase")
             return
 
-        log.info("All agents finished — restarting to apply self-improvements")
+        log.info("All agent processes done — restarting to apply self-improvements")
         request_shutdown()
 
     async def on_agent_stuck(self, plan_name: str) -> None:
