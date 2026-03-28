@@ -14,6 +14,10 @@ _VALID_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 _SKIP_PREFIXES = ("draft-",)
 
 
+def is_valid_plan_name(name: str) -> bool:
+    return bool(_VALID_NAME_RE.match(name))
+
+
 class InvalidPlanNameError(ValueError):
     def __init__(self, name: str, file_path: Path) -> None:
         self.name = name
