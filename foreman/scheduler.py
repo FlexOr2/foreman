@@ -175,7 +175,16 @@ class AgentScheduler:
             self.cascade_failure(plan_name)
             return
 
-        decision = verdict.get("verdict")
+        raw_decision = verdict.get("verdict", "")
+        try:
+            decision = ReviewVerdict(raw_decision.strip().lower())
+        except ValueError:
+            self.db.set_plan_status(
+                plan_name, PlanStatus.BLOCKED,
+                reason=f"Unknown review verdict: {raw_decision!r}",
+            )
+            self.cascade_failure(plan_name)
+            return
 
         if decision == ReviewVerdict.CLEAN:
             log.info("Review passed for %s", plan_name)
@@ -205,13 +214,6 @@ class AgentScheduler:
             reason = verdict.get("reason", "Architectural problem")
             log.warning("Architectural issue in %s: %s", plan_name, reason)
             self.db.set_plan_status(plan_name, PlanStatus.BLOCKED, reason=reason)
-            self.cascade_failure(plan_name)
-
-        else:
-            self.db.set_plan_status(
-                plan_name, PlanStatus.BLOCKED,
-                reason=f"Unknown review verdict: {decision}",
-            )
             self.cascade_failure(plan_name)
 
     def _read_review_verdict(self, worktree_path: str) -> dict | None:
