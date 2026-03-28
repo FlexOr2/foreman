@@ -13,6 +13,13 @@ dependencies = [
     "asyncinotify>=4.0",
 ]
 
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.100",
+    "uvicorn>=0.24",
+    "python-multipart>=0.0.9",
+]
+
 [project.scripts]
 foreman = "foreman.cli:app"
 

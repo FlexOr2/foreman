@@ -84,6 +84,7 @@ class Config:
     })
 
     auto_restart: bool = True
+    web_port: int = 8765
 
     plan_overrides: dict[str, dict] = field(default_factory=dict)
 
@@ -118,7 +119,7 @@ log = logging.getLogger(__name__)
 KNOWN_TOP_LEVEL_KEYS = {
     "plans_dir", "prompts_dir", "coordination_db", "log_dir",
     "log_file", "worktree_dir", "scripts_dir", "branch_prefix",
-    "auto_restart", "prompts", "timeouts", "agents", "innovate",
+    "auto_restart", "web_port", "prompts", "timeouts", "agents", "innovate",
     "allowed_tools", "plans",
 }
 
@@ -168,10 +169,11 @@ def load_config(repo_root: Path | None = None) -> Config:
                 log.warning("Unknown config key: foreman.%s", key)
 
         for key in ("plans_dir", "prompts_dir", "coordination_db", "log_dir",
-                     "log_file", "worktree_dir", "scripts_dir", "branch_prefix", "auto_restart"):
+                     "log_file", "worktree_dir", "scripts_dir", "branch_prefix",
+                     "auto_restart", "web_port"):
             if key in foreman:
                 value = foreman[key]
-                if key not in ("branch_prefix", "auto_restart"):
+                if key not in ("branch_prefix", "auto_restart", "web_port"):
                     value = Path(value)
                 setattr(config, key, value)
 

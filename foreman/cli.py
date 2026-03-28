@@ -658,6 +658,35 @@ def stop(repo: Path = Path(".")) -> None:
 
 
 @app.command
+def web(
+    repo: Path = Path("."),
+    port: int | None = None,
+    host: str = "127.0.0.1",
+) -> None:
+    """Start the web dashboard."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[red]uvicorn not installed.[/red] Run: pip install 'foreman[web]'")
+        sys.exit(1)
+
+    try:
+        from fastapi import FastAPI  # noqa: F401
+    except ImportError:
+        console.print("[red]fastapi not installed.[/red] Run: pip install 'foreman[web]'")
+        sys.exit(1)
+
+    from foreman.web import create_app
+
+    config = load_config(repo.resolve())
+    effective_port = port if port is not None else config.web_port
+
+    app = create_app(config)
+    console.print(f"[bold]Foreman web dashboard[/bold] → http://{host}:{effective_port}")
+    uvicorn.run(app, host=host, port=effective_port, log_level="warning")
+
+
+@app.command
 def observer(repo: Path = Path("."), debug: bool = False) -> None:
     """Run the observer standalone (for debugging)."""
     from foreman.observer import run
