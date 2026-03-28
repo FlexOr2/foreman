@@ -201,10 +201,10 @@ def run(repo_root: Path) -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    from foreman.cli import _setup_logging
+    from foreman.config import load_config
+
     repo = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd()
+    config = load_config(repo.resolve())
+    _setup_logging(log_file=config.log_file)
     run(repo.resolve())
