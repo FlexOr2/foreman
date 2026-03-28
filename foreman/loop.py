@@ -100,7 +100,7 @@ class ForemanLoop:
         finally:
             await self._graceful_shutdown()
 
-        return RESTART_EXIT_CODE if self.merger.restart_pending else 0
+        return RESTART_EXIT_CODE if self.merger.restart_requested else 0
 
     def _request_shutdown(self) -> None:
         log.info("Shutdown requested")
@@ -298,7 +298,7 @@ class ForemanLoop:
     async def _scheduler_loop(self) -> None:
         while not self._shutdown.is_set():
             self.scheduler.schedule_event.clear()
-            if self.merger.restart_pending:
+            if self.merger.should_restart():
                 await self.watchdog.try_restart(
                     self._innovator_running,
                     self._request_shutdown,
@@ -327,7 +327,7 @@ class ForemanLoop:
         foreman_dir = self.config.repo_root / ".foreman"
 
         while not self._shutdown.is_set():
-            if self.merger.restart_pending:
+            if self.merger.should_restart():
                 log.info("Innovator pausing for restart")
                 return
 
@@ -338,23 +338,23 @@ class ForemanLoop:
                     if cycle % self.config.innovate.cleanup_every == 0:
                         await run_cleanup_cycle(
                             self.config,
-                            should_stop=lambda: self.merger.restart_pending,
+                            should_stop=lambda: self.merger.should_restart(),
                         )
                     elif cycle % self.config.innovate.test_every == 0:
                         await run_test_cycle(
                             self.config,
-                            should_stop=lambda: self.merger.restart_pending,
+                            should_stop=lambda: self.merger.should_restart(),
                         )
                     else:
                         await innovate(
                             self.config,
                             skip_review=self.config.innovate.skip_review,
-                            should_stop=lambda: self.merger.restart_pending,
+                            should_stop=lambda: self.merger.should_restart(),
                         )
                 finally:
                     self._innovator_running = False
                     save_cycle_count(foreman_dir, cycle + 1)
-                    if self.merger.restart_pending:
+                    if self.merger.should_restart():
                         self.scheduler.schedule_event.set()
 
             await self._wait_for_interval(self.config.innovate.interval)
