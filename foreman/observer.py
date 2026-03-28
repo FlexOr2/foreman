@@ -172,7 +172,7 @@ async def observe_loop(repo_root: Path) -> None:
                     exponent = failure_count - RESTART_MAX_FAST_FAILURES + 1
                     backoff = min(RESTART_BACKOFF_BASE * (2 ** exponent), RESTART_BACKOFF_MAX)
                     log.critical(
-                        "Foreman has failed %d times in %ds — backing off %ds before next restart",
+                        "Foreman has failed %d times in %ds — restarting now, next check in %ds",
                         failure_count, RESTART_FAST_WINDOW, backoff,
                     )
                     check_interval = float(backoff)
