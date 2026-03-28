@@ -132,6 +132,12 @@ textarea, input[type=text] {
 .file-body { padding: 14px; max-height: 65vh; overflow-y: auto; }
 pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 12px; line-height: 1.6; }
 .innovate-running { font-size: 11px; color: #bb9af7; padding: 4px 10px; }
+.innovate-group { display: inline-flex; gap: 4px; align-items: center; }
+.innovate-group select {
+  background: var(--bg); border: 1px solid rgba(187,154,247,.3);
+  color: #bb9af7; padding: 2px 6px; border-radius: 3px;
+  font-family: inherit; font-size: 11px; cursor: pointer;
+}
 input[type=number], select {
   background: var(--bg); border: 1px solid var(--border);
   color: var(--text); padding: 5px 8px; border-radius: 3px;
@@ -506,8 +512,13 @@ def _render_header(config: Config, db: CoordinationDB | None) -> str:
         f'<span class="stat">Workers <b>{workers}/{w_max}</b></span>'
         f'<span class="stat">Reviews <b>{reviews}/{r_max}</b></span>'
         f'{draft_note}'
-        f'<form method="post" action="/innovate" style="display:inline">'
-        f'<button type="submit" class="btn btn-purple">⚡ Innovate</button></form>'
+        f'<form method="post" action="/innovate" style="display:inline" class="innovate-group">'
+        f'<select name="mode"><option value="innovate">Innovate</option>'
+        f'<option value="cleanup">Cleanup</option><option value="test">Test</option></select>'
+        f'<select name="model"><option value="">default</option>'
+        f'<option value="sonnet">sonnet</option><option value="opus">opus</option>'
+        f'<option value="haiku">haiku</option></select>'
+        f'<button type="submit" class="btn btn-purple">Run</button></form>'
         f'<button class="btn" onclick="document.getElementById(\'config-dialog\').showModal()">Config</button>'
         f'</div>'
         f'</header>'
@@ -890,8 +901,12 @@ def create_app(config: Config) -> FastAPI:
         return RedirectResponse("/", status_code=303)
 
     @app.post("/innovate")
-    async def trigger_innovate(background_tasks: BackgroundTasks) -> RedirectResponse:
-        background_tasks.add_task(_run_innovate_background, config)
+    async def trigger_innovate(
+        background_tasks: BackgroundTasks,
+        mode: Annotated[str, Form()] = "innovate",
+        model: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        background_tasks.add_task(_run_innovate_background, config, mode, model)
         return RedirectResponse("/", status_code=303)
 
     @app.post("/config")
@@ -935,13 +950,18 @@ def create_app(config: Config) -> FastAPI:
 _innovate_lock = asyncio.Lock()
 
 
-async def _run_innovate_background(config: Config) -> None:
+async def _run_innovate_background(config: Config, mode: str = "innovate", model: str = "") -> None:
     if _innovate_lock.locked():
         log.info("Innovate already running, skipping")
         return
     async with _innovate_lock:
         try:
-            from foreman.innovate import innovate
-            await innovate(config)
+            from foreman.innovate import innovate, run_cleanup_cycle, run_test_cycle
+            if mode == "cleanup":
+                await run_cleanup_cycle(config, model=model)
+            elif mode == "test":
+                await run_test_cycle(config, model=model)
+            else:
+                await innovate(config, model=model)
         except Exception:
-            log.error("Background innovate failed", exc_info=True)
+            log.error("Background %s failed", mode, exc_info=True)

@@ -692,6 +692,7 @@ async def innovate(
     skip_review: bool = False,
     on_review: _ReviewCallback | None = None,
     should_stop: Callable[[], bool] | None = None,
+    model: str = "",
 ) -> list[Path]:
     foreman_dir = config.repo_root / ".foreman"
     lock_path = foreman_dir / "innovator" / "innovate.lock"
@@ -715,6 +716,7 @@ async def innovate(
             skip_review=skip_review,
             on_review=on_review,
             should_stop=should_stop,
+            model=model,
         )
     finally:
         lock_path.unlink(missing_ok=True)
@@ -729,6 +731,7 @@ async def _innovate(
     skip_review: bool = False,
     on_review: _ReviewCallback | None = None,
     should_stop: Callable[[], bool] | None = None,
+    model: str = "",
 ) -> list[Path]:
     effective_categories = categories or config.innovate.categories
     effective_max = max_ideas or config.innovate.max_ideas
@@ -745,6 +748,7 @@ async def _innovate(
         allowed_tools=tools,
         permission_mode=config.agents.permission_mode,
         claude_bin=config.claude_bin,
+        model=model,
     )
 
     written: list[Path] = []
@@ -921,6 +925,7 @@ def _build_cleanup_prompt(review_template: str, max_plans: int) -> str:
 async def run_cleanup_cycle(
     config: Config,
     should_stop: Callable[[], bool] | None = None,
+    model: str = "",
 ) -> list[Path]:
     review_file = config.repo_root / _ARCHITECTURE_REVIEW_FILE
     if not review_file.exists():
@@ -938,6 +943,7 @@ async def run_cleanup_cycle(
         allowed_tools=BRAIN_TOOLS,
         permission_mode=config.agents.permission_mode,
         claude_bin=config.claude_bin,
+        model=model,
     )
 
     log.info("Running cleanup cycle")
@@ -964,6 +970,7 @@ async def run_cleanup_cycle(
 async def run_test_cycle(
     config: Config,
     should_stop: Callable[[], bool] | None = None,
+    model: str = "",
 ) -> list[Path]:
     foreman_dir = config.repo_root / ".foreman"
     foreman_dir.mkdir(parents=True, exist_ok=True)
@@ -973,6 +980,7 @@ async def run_test_cycle(
         allowed_tools=BRAIN_TOOLS,
         permission_mode=config.agents.permission_mode,
         claude_bin=config.claude_bin,
+        model=model,
     )
 
     log.info("Running test generation cycle")

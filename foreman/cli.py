@@ -15,7 +15,7 @@ import cyclopts
 from rich.console import Console
 from rich.table import Table
 
-from foreman.config import FOREMAN_DIR, RESTART_EXIT_CODE, load_config
+from foreman.config import FOREMAN_DIR, RESTART_EXIT_CODE, Config, load_config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.dashboard import STATUS_STYLES
 from foreman.loop import ForemanLoop
@@ -491,12 +491,16 @@ def innovate(
     skip_review: bool = False,
     review_only: bool = False,
     categories: str | None = None,
+    cleanup: bool = False,
+    test: bool = False,
+    model: str | None = None,
 ) -> None:
     """Autonomously discover improvements via adversarial review pipeline."""
-    from foreman.innovate import innovate as run_innovate, review_existing_drafts, Verdict
+    from foreman.innovate import innovate as run_innovate, review_existing_drafts, run_cleanup_cycle, run_test_cycle, Verdict
 
     _setup_logging()
     config = load_config(repo.resolve())
+    effective_model = model or ""
 
     cat_list = [c.strip() for c in categories.split(",")] if categories else None
 
@@ -517,7 +521,27 @@ def innovate(
             console.print("\n[yellow]No drafts survived review.[/yellow]")
         return
 
+    if cleanup:
+        console.print("[bold]Foreman Cleanup[/bold] — architecture review cycle")
+        if effective_model:
+            console.print(f"  Model: {effective_model}")
+        console.print()
+        drafts = asyncio.run(run_cleanup_cycle(config, model=effective_model))
+        _print_drafts(drafts, config, skip_review)
+        return
+
+    if test:
+        console.print("[bold]Foreman Test[/bold] — test generation cycle")
+        if effective_model:
+            console.print(f"  Model: {effective_model}")
+        console.print()
+        drafts = asyncio.run(run_test_cycle(config, model=effective_model))
+        _print_drafts(drafts, config, skip_review)
+        return
+
     console.print("[bold]Foreman Innovate[/bold] — autonomous improvement discovery")
+    if effective_model:
+        console.print(f"  Model: {effective_model}")
     if cat_list:
         console.print(f"  Categories: {', '.join(cat_list)}")
     if path:
@@ -536,8 +560,13 @@ def innovate(
         scope_path=path,
         skip_review=skip_review,
         on_review=_on_review,
+        model=effective_model,
     ))
 
+    _print_drafts(drafts, config, skip_review)
+
+
+def _print_drafts(drafts: list[Path], config: Config, skip_review: bool) -> None:
     if not drafts:
         console.print("\n[yellow]No actionable ideas survived.[/yellow]")
         return

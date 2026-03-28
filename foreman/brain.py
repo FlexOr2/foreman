@@ -23,13 +23,14 @@ def _read_file_or_none(path: Path) -> str | None:
 
 
 class ForemanBrain:
-    def __init__(self, foreman_dir: Path, allowed_tools: str, permission_mode: str, timeout: int = 900, claude_bin: str = "") -> None:
+    def __init__(self, foreman_dir: Path, allowed_tools: str, permission_mode: str, timeout: int = 900, claude_bin: str = "", model: str = "") -> None:
         self._session_file = foreman_dir / "session_id"
         self._context_file = foreman_dir / "context.md"
         self._allowed_tools = allowed_tools
         self._permission_mode = permission_mode
         self._timeout = timeout
         self._claude_bin = claude_bin
+        self._model = model
         self._lock = asyncio.Lock()
         self.session_id: str | None = _read_file_or_none(self._session_file)
         if self.session_id:
@@ -62,6 +63,8 @@ class ForemanBrain:
             "--allowed-tools", self._allowed_tools,
             "--permission-mode", self._permission_mode,
         ]
+        if self._model:
+            cmd += ["--model", self._model]
         if self.session_id:
             cmd += ["--resume", self.session_id]
 
