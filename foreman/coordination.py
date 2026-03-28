@@ -172,6 +172,12 @@ class CoordinationDB:
         ).fetchall()
         return {r["plan"] for r in rows}
 
+    def count_pending_plans(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM plans WHERE status != ?", (PlanStatus.DONE,)
+        ).fetchone()
+        return row[0]
+
     def mark_all_running_as_interrupted(self) -> int:
         with self.tx():
             cursor = self._conn.execute(

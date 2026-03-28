@@ -16,7 +16,6 @@ from rich.text import Text
 
 from foreman.config import Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
-from foreman.innovate import DRAFT_PREFIX
 
 REFRESH_INTERVAL = 2
 INNOVATOR_LOG_LINES = 10
@@ -65,13 +64,13 @@ def _time_ago(iso_str: str | None) -> str:
         return ""
 
 
-def _innovator_status(config: Config) -> str:
+def _innovator_status(config: Config, db: CoordinationDB) -> str:
     if not config.innovate.enabled:
         return "disabled"
-    plan_count = sum(1 for _ in config.plans_dir.glob(f"{DRAFT_PREFIX}*.md"))
+    plan_count = db.count_pending_plans()
     if plan_count >= config.innovate.max_drafts:
-        return f"paused ({plan_count}/{config.innovate.max_drafts} drafts)"
-    return f"running ({plan_count}/{config.innovate.max_drafts} drafts)"
+        return f"paused ({plan_count}/{config.innovate.max_drafts} pending)"
+    return f"running ({plan_count}/{config.innovate.max_drafts} pending)"
 
 
 def _build_slots_panel(config: Config, db: CoordinationDB) -> Panel:
@@ -84,7 +83,7 @@ def _build_slots_panel(config: Config, db: CoordinationDB) -> Panel:
     worker_text.append(f" Reviews: {reviewing}/{config.agents.max_parallel_reviews} ", style="blue")
 
     if config.innovate.enabled:
-        status = _innovator_status(config)
+        status = _innovator_status(config, db)
         style = "yellow" if "paused" in status else "green"
         worker_text.append("  ")
         worker_text.append(f" Innovator: {status} ", style=style)

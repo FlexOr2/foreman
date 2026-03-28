@@ -13,7 +13,7 @@ from foreman.brain import ForemanBrain
 from foreman.config import RESTART_EXIT_CODE, Config
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.dashboard import run_dashboard
-from foreman.innovate import DRAFT_PREFIX, innovate
+from foreman.innovate import innovate
 from foreman.merge import PlanMerger
 from foreman.monitor import StuckDetector, watch_done, watch_logs, watch_plans
 from foreman.plan_parser import InvalidPlanNameError, Plan, load_plans
@@ -306,7 +306,7 @@ class ForemanLoop:
     # --- Background innovation ---
 
     def _count_innovator_plans(self) -> int:
-        return sum(1 for _ in self.config.plans_dir.glob(f"{DRAFT_PREFIX}*.md"))
+        return self.db.count_pending_plans()
 
     async def _innovator_loop(self) -> None:
         if not self.config.innovate.enabled:
