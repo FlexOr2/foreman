@@ -24,6 +24,7 @@ class AgentType(StrEnum):
     IMPLEMENTATION = "implementation"
     REVIEW = "review"
     FIX = "fix"
+    REBASE = "rebase"
 
 
 class ReviewVerdict(StrEnum):

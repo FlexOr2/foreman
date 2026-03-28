@@ -55,10 +55,11 @@ class ForemanLoop:
         self.scheduler = AgentScheduler(
             self.db, self.spawner, config, self.stuck,
         )
-        self.merger = PlanMerger(self.db, self.brain, config)
+        self.merger = PlanMerger(self.db, config)
 
         self.scheduler.on_merge = self.merger.merge_plan
         self.merger.on_failure = self.scheduler.cascade_failure
+        self.merger.on_rebase_needed = self.scheduler.spawn_rebase
         self.watchdog.on_cascade = self.scheduler.cascade_failure
         self.watchdog.on_agent_done = self._dispatch_agent_done
         self.watchdog.on_finish_agent = self.scheduler.finish_agent
@@ -271,6 +272,8 @@ class ForemanLoop:
             await self.scheduler.on_review_done(plan_name)
         elif agent_type == AgentType.FIX:
             await self.scheduler.on_fix_done(plan_name)
+        elif agent_type == AgentType.REBASE:
+            await self.scheduler.on_rebase_done(plan_name)
 
     async def _done_watcher(self) -> None:
         done_dir = self.config.repo_root / ".foreman" / "done"

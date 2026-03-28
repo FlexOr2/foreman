@@ -274,6 +274,40 @@ class AgentScheduler:
         self.pending_reviews.add(plan_name)
         self.schedule_event.set()
 
+    async def spawn_rebase(self, plan_name: str) -> None:
+        plan = self.plans.get(plan_name)
+        plan_data = self.db.get_plan(plan_name)
+        if not plan or not plan_data:
+            return
+
+        worktree_path = Path(plan_data["worktree_path"])
+        initial_message = (
+            "Rebase this branch onto main and resolve all conflicts. "
+            "Run tests after resolving. Commit the resolved state."
+        )
+
+        pid = await self.spawner.spawn_agent(
+            plan, worktree_path, AgentType.REBASE, initial_message,
+        )
+
+        with self.db.tx():
+            agent_id = self.db.add_agent(
+                plan_name, AgentType.REBASE,
+                pid=pid,
+                log_file=str(self.config.log_dir / log_filename(plan_name, AgentType.REBASE)),
+            )
+            self.active_agent_ids[plan_name] = agent_id
+
+        self.stuck.track(plan_name)
+        timeout = self.config.get_timeout(plan_name, AgentType.REBASE)
+        if timeout > 0:
+            self.stuck.track_timeout(plan_name, timeout)
+        log.info("Spawned rebase agent for %s", plan_name)
+
+    async def on_rebase_done(self, plan_name: str) -> None:
+        self.pending_reviews.add(plan_name)
+        self.schedule_event.set()
+
     async def on_review_failure(self, plan_name: str) -> bool:
         branch = self.db.get_plan(plan_name)["branch"]
         has_commits = await branch_has_commits(branch, self.config.repo_root)
