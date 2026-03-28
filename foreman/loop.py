@@ -70,7 +70,6 @@ class ForemanLoop:
     async def run(self) -> int:
         check_prerequisites()
         self.config.ensure_dirs()
-        write_pid(self.config.repo_root, PID_FILE_FOREMAN)
         await self.spawner.setup()
 
         loop = asyncio.get_event_loop()
@@ -80,6 +79,8 @@ class ForemanLoop:
         await self._scan_plans()
         await self._process_stale_sentinels()
         await self._recover_running_plans()
+
+        write_pid(self.config.repo_root, PID_FILE_FOREMAN)
 
         try:
             async with asyncio.TaskGroup() as tg:
