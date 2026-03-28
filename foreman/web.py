@@ -132,6 +132,7 @@ pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-
 .innovate-running { font-size: 11px; color: #bb9af7; padding: 4px 10px; }
 .resume-option { display: block; width: 100%; text-align: left; padding: 8px 12px; margin-bottom: 6px; }
 .resume-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.priority-badge { font-size: 10px; color: var(--muted); min-width: 20px; text-align: center; }
 """
 
 _JS = """
@@ -203,10 +204,25 @@ def _form_btn(action: str, label: str, plan_name: str, cls: str = "", extra: str
     )
 
 
+def _priority_controls(name: str, priority: int) -> str:
+    enc = _h(name)
+    return (
+        f'<form method="post" action="/plans/{enc}/priority-up" style="display:inline">'
+        f'<button type="submit" class="btn" title="Increase priority">▲</button></form>'
+        f'<span class="priority-badge">{priority}</span>'
+        f'<form method="post" action="/plans/{enc}/priority-down" style="display:inline">'
+        f'<button type="submit" class="btn" title="Decrease priority">▼</button></form>'
+        f'<form method="post" action="/plans/{enc}/run-next" style="display:inline">'
+        f'<button type="submit" class="btn btn-blue" title="Move to front of queue">Next</button></form>'
+    )
+
+
 def _plan_actions(status: PlanStatus, name: str, plan_data: dict) -> str:
     parts: list[str] = []
 
-    if status == PlanStatus.RUNNING:
+    if status == PlanStatus.QUEUED:
+        parts.append(_priority_controls(name, plan_data.get("priority", 0)))
+    elif status == PlanStatus.RUNNING:
         parts.append(_form_btn("pause", "Pause", name, "btn-yellow"))
         parts.append(_form_btn("kill", "Kill", name, "btn-red"))
         parts.append(
@@ -728,6 +744,42 @@ def create_app(config: Config) -> FastAPI:
             return RedirectResponse("/", status_code=303)
         if config.coordination_db.exists():
             pass
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/plans/{plan_name}/priority-up")
+    async def priority_up(plan_name: str) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
+        if config.coordination_db.exists():
+            db = CoordinationDB(config.coordination_db)
+            plan_data = db.get_plan(plan_name)
+            if plan_data and PlanStatus(plan_data["status"]) == PlanStatus.QUEUED:
+                db.set_plan_priority(plan_name, plan_data.get("priority", 0) + 1)
+            db.close()
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/plans/{plan_name}/priority-down")
+    async def priority_down(plan_name: str) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
+        if config.coordination_db.exists():
+            db = CoordinationDB(config.coordination_db)
+            plan_data = db.get_plan(plan_name)
+            if plan_data and PlanStatus(plan_data["status"]) == PlanStatus.QUEUED:
+                db.set_plan_priority(plan_name, plan_data.get("priority", 0) - 1)
+            db.close()
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/plans/{plan_name}/run-next")
+    async def run_next(plan_name: str) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
+        if config.coordination_db.exists():
+            db = CoordinationDB(config.coordination_db)
+            plan_data = db.get_plan(plan_name)
+            if plan_data and PlanStatus(plan_data["status"]) == PlanStatus.QUEUED:
+                db.set_plan_priority(plan_name, db.get_max_queued_priority() + 1)
+            db.close()
         return RedirectResponse("/", status_code=303)
 
     @app.post("/drafts/{name}/activate")

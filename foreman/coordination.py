@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS plans (
     started_at TEXT,
     updated_at TEXT,
     blocked_reason TEXT,
-    model_override TEXT
+    model_override TEXT,
+    priority INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -79,6 +80,10 @@ class CoordinationDB:
         self._conn.executescript(_SCHEMA)
         try:
             self._conn.execute("ALTER TABLE plans ADD COLUMN model_override TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self._conn.execute("ALTER TABLE plans ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
         except sqlite3.OperationalError:
             pass
         self._in_tx = False
@@ -162,8 +167,23 @@ class CoordinationDB:
         return [dict(r) for r in rows]
 
     def get_all_plans(self) -> list[dict]:
-        rows = self._conn.execute("SELECT * FROM plans ORDER BY plan").fetchall()
+        rows = self._conn.execute(
+            "SELECT * FROM plans ORDER BY priority DESC, plan"
+        ).fetchall()
         return [dict(r) for r in rows]
+
+    def set_plan_priority(self, plan: str, priority: int) -> None:
+        with self.tx():
+            self._conn.execute(
+                "UPDATE plans SET priority=?, updated_at=? WHERE plan=?",
+                (priority, _now(), plan),
+            )
+
+    def get_max_queued_priority(self) -> int:
+        row = self._conn.execute(
+            "SELECT MAX(priority) FROM plans WHERE status=?", (PlanStatus.QUEUED,)
+        ).fetchone()
+        return row[0] if row[0] is not None else 0
 
     def get_completed_plan_names(self) -> set[str]:
         rows = self._conn.execute(
