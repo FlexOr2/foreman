@@ -80,9 +80,8 @@ class ForemanLoop:
         await self._process_stale_sentinels()
         await self._recover_running_plans()
 
-        write_pid(self.config.repo_root, PID_FILE_FOREMAN)
-
         try:
+            write_pid(self.config.repo_root, PID_FILE_FOREMAN)
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(self._plan_watcher())
                 tg.create_task(self._log_watcher())
