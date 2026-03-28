@@ -13,6 +13,7 @@ from fastapi import BackgroundTasks, FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from foreman.config import Config
+from foreman.plan_parser import is_valid_plan_name
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.innovate import INNOVATOR_MARKER
 from foreman.observer import PID_FILE_FOREMAN, PID_FILE_OBSERVER, is_process_running
@@ -499,6 +500,8 @@ def create_app(config: Config) -> FastAPI:
 
     @app.get("/plans/{plan_name}/file-content", response_class=HTMLResponse)
     async def plan_file_content(plan_name: str) -> str:
+        if not is_valid_plan_name(plan_name):
+            return '<span class="dim">Invalid plan name.</span>'
         path = config.plans_dir / f"{plan_name}.md"
         if not path.exists():
             return "<span class=\"dim\">File not found.</span>"
@@ -507,6 +510,8 @@ def create_app(config: Config) -> FastAPI:
 
     @app.post("/plans/{plan_name}/pause")
     async def pause_plan(plan_name: str) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
         db = CoordinationDB(config.coordination_db)
         status = db.get_plan_status(plan_name)
         db.close()
@@ -521,6 +526,8 @@ def create_app(config: Config) -> FastAPI:
 
     @app.post("/plans/{plan_name}/resume")
     async def resume_plan(plan_name: str) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
         db = CoordinationDB(config.coordination_db)
         plan_data = db.get_plan(plan_name)
         db.close()
@@ -552,6 +559,8 @@ def create_app(config: Config) -> FastAPI:
 
     @app.post("/plans/{plan_name}/kill")
     async def kill_plan(plan_name: str) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
         spawner = Spawner(config)
         for agent_type in AgentType:
             await spawner.kill_agent(plan_name, agent_type)
@@ -559,6 +568,8 @@ def create_app(config: Config) -> FastAPI:
 
     @app.post("/plans/{plan_name}/unblock")
     async def unblock_plan(plan_name: str) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
         if config.coordination_db.exists():
             db = CoordinationDB(config.coordination_db)
             status = db.get_plan_status(plan_name)
@@ -569,6 +580,8 @@ def create_app(config: Config) -> FastAPI:
 
     @app.post("/plans/{plan_name}/unblock-clean")
     async def unblock_plan_clean(plan_name: str) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
         if config.coordination_db.exists():
             from foreman.worktree import remove_worktree
             await remove_worktree(plan_name, config)
@@ -584,12 +597,16 @@ def create_app(config: Config) -> FastAPI:
         plan_name: str,
         message: Annotated[str, Form()],
     ) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
         if config.coordination_db.exists():
             pass
         return RedirectResponse("/", status_code=303)
 
     @app.post("/drafts/{name}/activate")
     async def activate_draft(name: str) -> RedirectResponse:
+        if not is_valid_plan_name(name):
+            return RedirectResponse("/", status_code=303)
         src = config.plans_dir / f"draft-{name}.md"
         dst = config.plans_dir / f"{name}.md"
         if src.exists() and not dst.exists():
@@ -598,6 +615,8 @@ def create_app(config: Config) -> FastAPI:
 
     @app.post("/drafts/{name}/reject")
     async def reject_draft(name: str) -> RedirectResponse:
+        if not is_valid_plan_name(name):
+            return RedirectResponse("/", status_code=303)
         path = config.plans_dir / f"draft-{name}.md"
         path.unlink(missing_ok=True)
         return RedirectResponse("/", status_code=303)
