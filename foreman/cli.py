@@ -187,7 +187,10 @@ def start(
     while True:
         try:
             exit_code = asyncio.run(ForemanLoop(config).run())
-        except (KeyboardInterrupt, SystemExit):
+        except KeyboardInterrupt:
+            break
+        except SystemExit as e:
+            log.error("Foreman received SystemExit(%s)", e.code, exc_info=True)
             break
         except Exception:
             log.error("Foreman crashed", exc_info=True)
