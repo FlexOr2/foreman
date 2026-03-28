@@ -8,6 +8,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from foreman.config import FOREMAN_DIR, load_config
@@ -19,6 +20,10 @@ log = logging.getLogger(__name__)
 
 OBSERVER_CHECK_INTERVAL = 30
 ORPHAN_AGE_MINUTES = 20
+RESTART_BACKOFF_BASE = 30
+RESTART_BACKOFF_MAX = 600
+RESTART_MAX_FAST_FAILURES = 5
+RESTART_FAST_WINDOW = 120
 
 PID_FILE_OBSERVER = "observer.pid"
 PID_FILE_FOREMAN = "foreman.pid"
@@ -100,8 +105,8 @@ def _minutes_since(iso_timestamp: str | None) -> float:
         return float("inf")
 
 
-def _start_foreman(repo_root: Path) -> None:
-    subprocess.Popen(
+def _start_foreman(repo_root: Path) -> subprocess.Popen:
+    return subprocess.Popen(
         [sys.executable, "-m", "foreman.cli", "start"],
         cwd=repo_root,
         start_new_session=True,
@@ -140,20 +145,50 @@ async def observe_loop(repo_root: Path) -> None:
     write_pid(repo_root, PID_FILE_OBSERVER)
     log.info("Observer started (PID %d)", os.getpid())
 
+    recent_restarts: list[float] = []
+    last_started: subprocess.Popen | None = None
+    check_interval = float(OBSERVER_CHECK_INTERVAL)
+
     try:
         while not shutdown.is_set():
             try:
-                await asyncio.wait_for(shutdown.wait(), timeout=OBSERVER_CHECK_INTERVAL)
+                await asyncio.wait_for(shutdown.wait(), timeout=check_interval)
                 break
             except asyncio.TimeoutError:
                 pass
 
+            if last_started is not None and last_started.poll() is not None:
+                log.warning("Foreman crashed immediately after restart (exit code %d)", last_started.returncode)
+                last_started = None
+
             config = load_config(repo_root)
 
             if not is_process_running(repo_root, PID_FILE_FOREMAN):
-                log.warning("Foreman is not running — restarting")
-                _start_foreman(repo_root)
+                now = time.monotonic()
+                recent_restarts = [t for t in recent_restarts if now - t < RESTART_FAST_WINDOW]
+                failure_count = len(recent_restarts)
+
+                if failure_count >= RESTART_MAX_FAST_FAILURES:
+                    exponent = failure_count - RESTART_MAX_FAST_FAILURES + 1
+                    backoff = min(RESTART_BACKOFF_BASE * (2 ** exponent), RESTART_BACKOFF_MAX)
+                    log.critical(
+                        "Foreman has failed %d times in %ds — backing off %ds before next restart",
+                        failure_count, RESTART_FAST_WINDOW, backoff,
+                    )
+                    check_interval = float(backoff)
+                else:
+                    log.warning("Foreman is not running — restarting")
+                    check_interval = float(OBSERVER_CHECK_INTERVAL)
+
+                recent_restarts.append(now)
+                last_started = _start_foreman(repo_root)
                 continue
+            else:
+                now = time.monotonic()
+                recent_restarts = [t for t in recent_restarts if now - t < RESTART_FAST_WINDOW]
+                if not recent_restarts:
+                    check_interval = float(OBSERVER_CHECK_INTERVAL)
+                last_started = None
 
             if not config.coordination_db.exists():
                 continue
