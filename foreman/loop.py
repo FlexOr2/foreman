@@ -138,7 +138,8 @@ class ForemanLoop:
     async def _scan_plans(self) -> None:
         try:
             plans = load_plans(self.config.plans_dir)
-            validate_dag(plans)
+            completed = self.db.get_completed_plan_names()
+            validate_dag(plans, known_completed=completed)
         except (InvalidPlanNameError, CircularDependencyError, UnresolvedDependencyError) as e:
             log.error("%s", e)
             return
