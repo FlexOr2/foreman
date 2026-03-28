@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html as _html
 import json
+import logging
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,9 @@ from foreman.plan_parser import is_valid_plan_name
 from foreman.coordination import AgentType, CoordinationDB, PlanStatus
 from foreman.innovate import INNOVATOR_MARKER
 from foreman.observer import PID_FILE_FOREMAN, PID_FILE_OBSERVER, is_process_running
-from foreman.spawner import Spawner
+from foreman.spawner import Spawner, log_filename
+
+log = logging.getLogger(__name__)
 
 _STATUS_COLOR = {
     PlanStatus.QUEUED: "#a9b1d6",
@@ -127,6 +130,8 @@ textarea, input[type=text] {
 .file-body { padding: 14px; max-height: 65vh; overflow-y: auto; }
 pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 12px; line-height: 1.6; }
 .innovate-running { font-size: 11px; color: #bb9af7; padding: 4px 10px; }
+.resume-option { display: block; width: 100%; text-align: left; padding: 8px 12px; margin-bottom: 6px; }
+.resume-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
 """
 
 _JS = """
@@ -153,6 +158,17 @@ function confirmUnblockClean(name) {
   if (confirm('Unblock ' + name + ' and discard existing worktree?')) {
     document.getElementById('unblock-clean-form-' + name).submit();
   }
+}
+function showResume(planName, hasWorktree) {
+  document.getElementById('resume-plan-name').textContent = planName;
+  var enc = encodeURIComponent(planName);
+  document.getElementById('resume-review-form').action = '/plans/' + enc + '/resume-review';
+  document.getElementById('resume-opus-form').action = '/plans/' + enc + '/resume-review';
+  document.getElementById('force-merge-form').action = '/plans/' + enc + '/force-merge';
+  document.getElementById('resume-scratch-form').action = '/plans/' + enc + '/unblock-clean';
+  var implOpts = document.querySelectorAll('.resume-needs-impl');
+  implOpts.forEach(function(el) { el.style.display = hasWorktree ? '' : 'none'; });
+  document.getElementById('resume-dialog').showModal();
 }
 """
 
@@ -192,7 +208,7 @@ def _form_btn(action: str, label: str, plan_name: str, cls: str = "", extra: str
     )
 
 
-def _plan_actions(status: PlanStatus, name: str) -> str:
+def _plan_actions(status: PlanStatus, name: str, plan_data: dict) -> str:
     parts: list[str] = []
 
     if status == PlanStatus.RUNNING:
@@ -207,13 +223,10 @@ def _plan_actions(status: PlanStatus, name: str) -> str:
         parts.append(_form_btn("resume", "Resume", name, "btn-green"))
         parts.append(_form_btn("kill", "Kill", name, "btn-red"))
     elif status in (PlanStatus.BLOCKED, PlanStatus.FAILED):
-        parts.append(_form_btn("unblock", "Unblock", name, "btn-yellow"))
-        esc = _h(name)
+        has_worktree = bool(plan_data.get("worktree_path"))
         parts.append(
-            f'<form id="unblock-clean-form-{esc}" method="post" '
-            f'action="/plans/{esc}/unblock-clean" style="display:inline">'
-            f'<button type="button" class="btn btn-red" '
-            f'onclick="confirmUnblockClean({_h(json.dumps(name))})">Unblock (clean)</button></form>'
+            f'<button class="btn btn-yellow" '
+            f'onclick="showResume({_h(json.dumps(name))}, {str(has_worktree).lower()})">Resume</button>'
         )
 
     parts.append(
@@ -245,7 +258,7 @@ def _render_plans(db: CoordinationDB) -> str:
             f'<td class="dim">{_h(_time_ago(p.get("updated_at")))}</td>'
             f'<td class="dim" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;'
             f'white-space:nowrap" title="{_h(reason)}">{_h(reason[:80])}</td>'
-            f'<td class="actions">{_plan_actions(status, p["plan"])}</td>'
+            f'<td class="actions">{_plan_actions(status, p["plan"], p)}</td>'
             f"</tr>"
         )
 
@@ -474,6 +487,48 @@ def _page(config: Config) -> str:
   </form>
 </dialog>
 
+<dialog id="resume-dialog">
+  <h3>Resume: <span id="resume-plan-name"></span></h3>
+  <div style="display:flex;flex-direction:column;gap:4px;margin-top:10px">
+    <div class="resume-needs-impl">
+      <form id="resume-review-form" method="post">
+        <button type="submit" class="btn btn-blue resume-option">
+          Resume review
+          <div class="resume-desc">Re-run the review agent — code is already committed</div>
+        </button>
+      </form>
+    </div>
+    <div class="resume-needs-impl">
+      <form id="resume-opus-form" method="post">
+        <input type="hidden" name="model" value="claude-opus-4-6">
+        <button type="submit" class="btn btn-purple resume-option">
+          Resume with Opus
+          <div class="resume-desc">Run review with claude-opus-4-6 for complex or tricky changes</div>
+        </button>
+      </form>
+    </div>
+    <div class="resume-needs-impl">
+      <form id="force-merge-form" method="post">
+        <button type="submit" class="btn btn-green resume-option">
+          Force merge
+          <div class="resume-desc">Skip review, merge the branch directly — you trust the implementation</div>
+        </button>
+      </form>
+    </div>
+    <div>
+      <form id="resume-scratch-form" method="post">
+        <button type="submit" class="btn btn-red resume-option">
+          Retry from scratch
+          <div class="resume-desc">Discard the existing worktree and re-queue for implementation</div>
+        </button>
+      </form>
+    </div>
+  </div>
+  <div class="dialog-actions" style="margin-top:14px">
+    <button type="button" class="btn" onclick="document.getElementById('resume-dialog').close()">Cancel</button>
+  </div>
+</dialog>
+
 <dialog id="file-dialog" style="min-width:560px;max-width:800px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <span id="file-title" style="font-weight:bold;font-size:13px"></span>
@@ -590,6 +645,83 @@ def create_app(config: Config) -> FastAPI:
             if status in (PlanStatus.BLOCKED, PlanStatus.FAILED):
                 db.set_plan_status(plan_name, PlanStatus.QUEUED)
             db.close()
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/plans/{plan_name}/resume-review")
+    async def resume_review_plan(
+        plan_name: str,
+        model: Annotated[str | None, Form()] = None,
+    ) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
+        if not config.coordination_db.exists():
+            return RedirectResponse("/", status_code=303)
+        db = CoordinationDB(config.coordination_db)
+        plan_data = db.get_plan(plan_name)
+        if not plan_data or PlanStatus(plan_data["status"]) not in (PlanStatus.BLOCKED, PlanStatus.FAILED):
+            db.close()
+            return RedirectResponse("/", status_code=303)
+        worktree_path = plan_data.get("worktree_path")
+        if not worktree_path or not Path(worktree_path).exists():
+            db.close()
+            return RedirectResponse("/", status_code=303)
+        if model:
+            db.set_model_override(plan_name, model)
+        db.close()
+        from foreman.plan_parser import load_plans
+        plans = {p.name: p for p in load_plans(config.plans_dir)}
+        plan_obj = plans.get(plan_name)
+        if not plan_obj:
+            return RedirectResponse("/", status_code=303)
+        plan_file = plan_obj.file_path.resolve()
+        initial_message = (
+            f"Review the changes on this branch against main. "
+            f"The original plan is at {plan_file}."
+        )
+        spawner = Spawner(config)
+        await spawner.setup()
+        pid = await spawner.spawn_agent(
+            plan_obj, Path(worktree_path), AgentType.REVIEW, initial_message,
+            model_override=model or None,
+        )
+        db2 = CoordinationDB(config.coordination_db)
+        db2.set_plan_status(plan_name, PlanStatus.REVIEWING)
+        db2.add_agent(
+            plan_name, AgentType.REVIEW, pid=pid,
+            log_file=str(config.log_dir / log_filename(plan_name, AgentType.REVIEW)),
+        )
+        db2.close()
+        log.info("Resume-review triggered for %s (model=%s)", plan_name, model or "default")
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/plans/{plan_name}/force-merge")
+    async def force_merge_plan(plan_name: str) -> RedirectResponse:
+        if not is_valid_plan_name(plan_name):
+            return RedirectResponse("/", status_code=303)
+        if not config.coordination_db.exists():
+            return RedirectResponse("/", status_code=303)
+        db = CoordinationDB(config.coordination_db)
+        plan_data = db.get_plan(plan_name)
+        db.close()
+        if not plan_data or PlanStatus(plan_data["status"]) not in (PlanStatus.BLOCKED, PlanStatus.FAILED):
+            return RedirectResponse("/", status_code=303)
+        branch = plan_data.get("branch")
+        if not branch:
+            return RedirectResponse("/", status_code=303)
+        from foreman.worktree import merge_branch, remove_worktree
+        success, output, _ = await merge_branch(branch, config.repo_root)
+        db2 = CoordinationDB(config.coordination_db)
+        if success:
+            log.info("Force-merged branch %s for plan %s (skipped review)", branch, plan_name)
+            db2.set_plan_status(plan_name, PlanStatus.DONE)
+            db2.close()
+            await remove_worktree(plan_name, config)
+            plan_file = config.plans_dir / f"{plan_name}.md"
+            plan_file.unlink(missing_ok=True)
+        else:
+            log.warning("Force merge failed for %s: %s", plan_name, output[:200])
+            db2.set_plan_status(plan_name, PlanStatus.BLOCKED, reason=f"Force merge failed: {output[:200]}")
+            db2.close()
         return RedirectResponse("/", status_code=303)
 
     @app.post("/plans/{plan_name}/guide")
