@@ -79,7 +79,7 @@ async def remove_worktree(plan_name: str, config: Config) -> None:
 
 async def branch_has_commits(branch: str, repo_root: Path) -> int:
     rc, stdout, _ = await _run_git(
-        "rev-list", "--count", f"main..{branch}", cwd=repo_root,
+        "rev-list", "--count", f"HEAD..{branch}", cwd=repo_root,
     )
     if rc != 0:
         return 0
