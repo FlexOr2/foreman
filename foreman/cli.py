@@ -417,40 +417,12 @@ def resume(plan_name: str, repo: Path = Path(".")) -> None:
         db.close()
         return
 
-    worktree_path = plan_data.get("worktree_path")
-    branch = plan_data.get("branch")
-    if not worktree_path or not Path(worktree_path).exists():
-        console.print(f"[red]Worktree not found for {plan_name}[/red]")
-        db.close()
-        return
-
-    from foreman.plan_parser import load_plans
-    plans = {p.name: p for p in load_plans(config.plans_dir)}
-    plan = plans.get(plan_name)
-    if not plan:
-        console.print(f"[red]Plan file not found for {plan_name}[/red]")
-        db.close()
-        return
-
-    plan_file = plan.file_path.resolve()
-    initial_message = (
-        f"You are resuming work on this plan. "
-        f"Read the plan at {plan_file} and review what has already been done on branch {branch}. "
-        f"Continue where the previous agent left off. Commit all changes when done."
-    )
-
-    async def _resume() -> None:
-        spawner = Spawner(config)
-        await spawner.setup()
-        pid = await spawner.spawn_agent(
-            plan, Path(worktree_path), AgentType.IMPLEMENTATION, initial_message,
-        )
-        db.set_plan_status(plan_name, PlanStatus.RUNNING)
-        db.add_agent(plan_name, AgentType.IMPLEMENTATION, pid=pid)
-
-    asyncio.run(_resume())
+    db.set_plan_status(plan_name, PlanStatus.QUEUED)
     db.close()
-    console.print(f"Resumed [bold]{plan_name}[/bold] in existing worktree")
+    plan_file = config.plans_dir / f"{plan_name}.md"
+    if plan_file.exists():
+        plan_file.write_bytes(plan_file.read_bytes())
+    console.print(f"Queued [bold]{plan_name}[/bold] for resumption — main loop will spawn the agent")
 
 
 @app.command

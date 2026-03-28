@@ -217,6 +217,7 @@ class ForemanLoop:
                     status = self.db.get_plan_status(name)
                     if status not in (PlanStatus.RUNNING, PlanStatus.REVIEWING):
                         await self._scan_plans()
+                        self.scheduler.schedule_event.set()
             except Exception:
                 log.error("Error processing plan event for %s", file_path, exc_info=True)
 
