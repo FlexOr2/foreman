@@ -72,7 +72,7 @@ class AgentWatchdog:
             agent_id = self.on_finish_agent(plan_name) if self.on_finish_agent else None
 
             if sentinel_file.exists():
-                exit_code = read_exit_code(self.config.repo_root / ".foreman" / "done", sentinel_name)
+                exit_code = read_exit_code(self.config.repo_root / ".foreman" / "done", sentinel_name, plan_name)
                 sentinel_file.unlink(missing_ok=True)
                 if agent_id is not None:
                     self.db.finish_agent(agent_id, exit_code)
