@@ -748,6 +748,203 @@ async def innovate(
     return written
 
 
+_INNOVATOR_STATE_FILE = "innovator_state.json"
+_ARCHITECTURE_REVIEW_FILE = "architecture-review.md"
+
+_CLEANUP_EXTRA_CHECKS = """\
+Additional cleanup checks:
+- Which files are over 200 lines and should be split?
+- What functions do more than one thing?
+- What code is duplicated across modules?
+- What imports or functions are unused?
+- What was added by a previous plan but is no longer needed?
+- Does the code still match CLAUDE.md rules?
+
+Also check if CLAUDE.md still reflects the actual codebase:
+- Are the module descriptions accurate after recent refactors?
+- Are there new conventions that emerged and should be documented?
+- Are there rules that no longer apply?
+
+If CLAUDE.md is outdated, generate a plan to update it."""
+
+_CLEANUP_OUTPUT_FORMAT = """\
+For each issue worth fixing, output a plan in exactly this format, separated by --- on its own line:
+
+# Short descriptive title
+
+> **Depends on:**
+
+## Problem
+
+Describe the specific issue found, with evidence from the code.
+
+## Solution
+
+Describe the concrete changes to make.
+
+## Scope
+
+List the files that would need to change.
+
+## Risk Assessment
+
+What could go wrong with this change.
+
+---
+
+Output ONLY the plan documents separated by ---, nothing else. If you find no actionable refactoring tasks, output exactly: NO_FINDINGS"""
+
+_TEST_PROMPT = """\
+You are an autonomous test coverage agent. Your job is to analyze this codebase and identify what is missing from the test suite.
+
+## Phase 1: Explore
+Read the codebase, existing tests, and understand the critical logic paths.
+
+## Phase 2: Analyze
+- What core logic has no test coverage?
+- What edge cases in the resolver/parser/coordination could break silently?
+- What integration between modules is untested?
+- What failure modes are never exercised?
+- What happy paths are tested but critical error paths are not?
+
+## Phase 3: Plan
+Generate concrete test plans. Each plan should describe specific test cases to write as pytest tests.
+
+Requirements:
+- Each plan must be concrete — specify the exact test functions and what they verify
+- Prefer tests that catch real bugs, not trivial coverage padding
+- Focus on: parser, resolver, coordination, and module integration
+- Generate at most 5 test plans
+
+For each test plan, output a plan in exactly this format, separated by --- on its own line:
+
+# Short descriptive title
+
+> **Depends on:**
+
+## Problem
+
+What currently has no coverage and why that is risky.
+
+## Solution
+
+The specific tests to write, with function names and what each verifies.
+
+## Scope
+
+List the test files to create or modify.
+
+## Risk Assessment
+
+What could go wrong if these tests do not exist.
+
+---
+
+Output ONLY the plan documents separated by ---, nothing else. If the test coverage is already adequate, output exactly: NO_FINDINGS"""
+
+
+def load_cycle_count(foreman_dir: Path) -> int:
+    state_file = foreman_dir / _INNOVATOR_STATE_FILE
+    if not state_file.exists():
+        return 0
+    try:
+        return json.loads(state_file.read_text(encoding="utf-8")).get("cycle", 0)
+    except (json.JSONDecodeError, OSError):
+        return 0
+
+
+def save_cycle_count(foreman_dir: Path, cycle: int) -> None:
+    state_file = foreman_dir / _INNOVATOR_STATE_FILE
+    state_file.write_text(json.dumps({"cycle": cycle}), encoding="utf-8")
+
+
+def _build_cleanup_prompt(review_template: str, max_plans: int) -> str:
+    return (
+        f"{review_template}\n\n---\n\n"
+        f"## Generate Refactoring Plans\n\n"
+        f"Based on The Bad and The Ugly sections of your review above, generate concrete refactoring plans.\n\n"
+        f"{_CLEANUP_EXTRA_CHECKS}\n\n"
+        f"Generate at most {max_plans} plans.\n\n"
+        f"{_CLEANUP_OUTPUT_FORMAT}"
+    )
+
+
+async def run_cleanup_cycle(
+    config: Config,
+    should_stop: Callable[[], bool] | None = None,
+) -> list[Path]:
+    review_file = config.repo_root / _ARCHITECTURE_REVIEW_FILE
+    if not review_file.exists():
+        log.warning("architecture-review.md not found at %s, skipping cleanup cycle", review_file)
+        return []
+
+    review_template = review_file.read_text(encoding="utf-8")
+    prompt = _build_cleanup_prompt(review_template, config.innovate.max_ideas)
+
+    foreman_dir = config.repo_root / ".foreman"
+    foreman_dir.mkdir(parents=True, exist_ok=True)
+
+    brain = ForemanBrain(
+        foreman_dir=foreman_dir / "innovator",
+        allowed_tools=BRAIN_TOOLS,
+        permission_mode=config.agents.permission_mode,
+    )
+
+    log.info("Running cleanup cycle")
+    result = await brain.think(prompt)
+
+    if should_stop and should_stop():
+        log.info("Innovator pausing for restart after cleanup exploration")
+        return []
+
+    if "NO_FINDINGS" in result:
+        log.info("Cleanup cycle complete — no findings")
+        return []
+
+    plans = _parse_draft_plans(result)[: config.innovate.max_ideas]
+    if not plans:
+        log.warning("Cleanup brain returned output but no parseable plans")
+        return []
+
+    log.info("Cleanup cycle shaped %d candidate plans", len(plans))
+    survivors = await _review_plans(plans, brain, config, config.innovate.skip_review, None, should_stop)
+    return _write_plans(config.plans_dir, survivors, auto_activate=config.innovate.auto_activate, slug_prefix="cleanup-")
+
+
+async def run_test_cycle(
+    config: Config,
+    should_stop: Callable[[], bool] | None = None,
+) -> list[Path]:
+    foreman_dir = config.repo_root / ".foreman"
+    foreman_dir.mkdir(parents=True, exist_ok=True)
+
+    brain = ForemanBrain(
+        foreman_dir=foreman_dir / "innovator",
+        allowed_tools=BRAIN_TOOLS,
+        permission_mode=config.agents.permission_mode,
+    )
+
+    log.info("Running test generation cycle")
+    result = await brain.think(_TEST_PROMPT)
+
+    if should_stop and should_stop():
+        log.info("Innovator pausing for restart after test exploration")
+        return []
+
+    if "NO_FINDINGS" in result:
+        log.info("Test cycle complete — no findings")
+        return []
+
+    plans = _parse_draft_plans(result)[: config.innovate.max_ideas]
+    if not plans:
+        log.warning("Test brain returned output but no parseable plans")
+        return []
+
+    log.info("Test cycle shaped %d candidate plans", len(plans))
+    survivors = await _review_plans(plans, brain, config, config.innovate.skip_review, None, should_stop)
+    return _write_plans(config.plans_dir, survivors, auto_activate=config.innovate.auto_activate, slug_prefix="test-")
+
+
 async def review_existing_drafts(
     config: Config,
     on_review: _ReviewCallback | None = None,

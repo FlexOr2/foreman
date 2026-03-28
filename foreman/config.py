@@ -59,6 +59,8 @@ class InnovateConfig:
     skip_review: bool = False
     reviewer_timeout: int = 600
     categories: list[str] = field(default_factory=lambda: list(ALL_IDEA_CATEGORIES))
+    cleanup_every: int = 3
+    test_every: int = 5
 
 
 @dataclass
