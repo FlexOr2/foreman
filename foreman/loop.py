@@ -95,7 +95,7 @@ class ForemanLoop:
                 tg.create_task(self._config_reload_loop())
                 tg.create_task(run_dashboard(self.config, self.db, self._shutdown))
                 tg.create_task(self._shutdown_waiter())
-        except* KeyboardInterrupt:
+        except* (KeyboardInterrupt, SystemExit):
             pass
         finally:
             await self._graceful_shutdown()

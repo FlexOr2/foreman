@@ -177,7 +177,7 @@ async def run_dashboard(config: Config, db: CoordinationDB, shutdown: asyncio.Ev
     try:
         live = Live(build_display(config, db), refresh_per_second=1, screen=False)
         live.start()
-    except Exception:
+    except (Exception, SystemExit):
         await shutdown.wait()
         return
 
@@ -187,6 +187,11 @@ async def run_dashboard(config: Config, db: CoordinationDB, shutdown: asyncio.Ev
                 await asyncio.wait_for(shutdown.wait(), timeout=REFRESH_INTERVAL)
             except asyncio.TimeoutError:
                 pass
-            live.update(build_display(config, db))
+            try:
+                live.update(build_display(config, db))
+            except (Exception, SystemExit):
+                live.stop()
+                await shutdown.wait()
+                return
     finally:
         live.stop()
